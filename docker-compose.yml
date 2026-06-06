@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quartoed
+      POSTGRES_PASSWORD: quartoed
+      POSTGRES_DB: quartoed
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql+asyncpg://quartoed:quartoed@db:5432/quartoed
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      SECRET_KEY: ${SECRET_KEY}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+    depends_on:
+      - db
+    volumes:
+      - workspace_data:/workspace
+
+volumes:
+  pg_data:
+  workspace_data:

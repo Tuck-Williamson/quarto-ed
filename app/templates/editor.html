@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>quarto-ed</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0d1117; color: #c9d1d9; display: flex;
+           flex-direction: column; height: 100vh; overflow: hidden; }
+
+    .topbar {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0 1rem; height: 42px; min-height: 42px;
+      background: #161b22; border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+    }
+    .topbar .logo { font-weight: 700; font-size: 0.9rem; color: #f0f6fc; }
+    .topbar .spacer { flex: 1; }
+    .topbar .user { font-size: 0.8rem; color: #8b949e; }
+
+    .btn {
+      font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.8rem;
+      border-radius: 5px; border: 1px solid #30363d; cursor: pointer;
+      background: #21262d; color: #c9d1d9; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .btn:hover { background: #30363d; }
+    .btn-green { background: #238636; border-color: #238636; color: #fff; }
+    .btn-green:hover { background: #2ea043; }
+    .btn-red { background: #6e2222; border-color: #6e2222; color: #fff; }
+    .btn-red:hover { background: #8a2222; }
+
+    .panel {
+      background: #161b22; border-bottom: 1px solid #30363d;
+      padding: 0.75rem 1rem; font-size: 0.83rem;
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .panel input[type=text] {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 5px;
+      color: #c9d1d9; padding: 0.3rem 0.6rem; font-size: 0.82rem; width: 180px;
+    }
+    .panel input[type=text]:focus { outline: none; border-color: #58a6ff; }
+
+    .warning-banner {
+      background: #2d1a00; border-bottom: 1px solid #6e4c00;
+      padding: 0.4rem 1rem; font-size: 0.78rem; color: #e3b341; flex-shrink: 0;
+    }
+
+    iframe {
+      flex: 1; border: none; width: 100%; display: block;
+    }
+
+    dialog {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      color: #c9d1d9; padding: 1.5rem; min-width: 320px;
+    }
+    dialog h3 { margin-bottom: 1rem; font-size: 1rem; }
+    dialog input { width: 100%; margin-bottom: 1rem; }
+    dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">quarto-ed</span>
+  <div class="spacer"></div>
+  <span class="user">{{ username }}</span>
+  <button class="btn btn-green" onclick="document.getElementById('syncDialog').showModal()">
+    ↑ Sync to GitHub
+  </button>
+  <button class="btn btn-red" onclick="logout()">Sign out</button>
+</div>
+
+<div class="panel">
+  <span>Load repo:</span>
+  <input type="text" id="repoOwner" placeholder="owner"
+         value="{{ repo_owner }}">
+  <span>/</span>
+  <input type="text" id="repoName" placeholder="repo-name"
+         value="{{ repo_name }}">
+  <button class="btn btn-green" onclick="loadWorkspace()">Load</button>
+  {% if has_workspace %}
+  <span style="color:#3fb950; font-size:0.78rem;">
+    ✓ {{ repo_owner }}/{{ repo_name }}
+  </span>
+  {% endif %}
+</div>
+
+{% if not has_workspace %}
+<div class="warning-banner">
+  ⚠ No workspace loaded — enter a GitHub repo above and click Load to start editing.
+</div>
+{% endif %}
+
+<div class="warning-banner">
+  ⚠ Unsaved changes are lost on server restart. Use <strong>Sync to GitHub</strong> before closing.
+</div>
+
+{% if has_workspace %}
+<iframe id="editor-frame" src="/proxy/" allow="clipboard-read; clipboard-write"></iframe>
+{% else %}
+<iframe id="editor-frame" srcdoc="<html><body style='background:#0d1117'></body></html>"></iframe>
+{% endif %}
+
+<dialog id="syncDialog">
+  <h3>Sync to GitHub</h3>
+  <input type="text" id="commitMsg" placeholder="Commit message"
+         value="Sync from quarto-ed" class="panel input" style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;padding:0.3rem 0.6rem;font-size:0.82rem;width:100%;margin-bottom:1rem;">
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('syncDialog').close()">Cancel</button>
+    <button class="btn btn-green" onclick="sync()">Push to GitHub</button>
+  </div>
+</dialog>
+
+<script>
+async function loadWorkspace() {
+  const owner = document.getElementById('repoOwner').value.trim();
+  const name  = document.getElementById('repoName').value.trim();
+  if (!owner || !name) { alert('Enter both owner and repo name.'); return; }
+  const res = await fetch('/api/workspace/load', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({repo_owner: owner, repo_name: name}),
+  });
+  if (res.ok) {
+    location.reload();
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert('Failed to load workspace: ' + (data.detail || res.statusText));
+  }
+}
+
+async function sync() {
+  const msg = document.getElementById('commitMsg').value.trim() || 'Sync from quarto-ed';
+  const res = await fetch('/api/workspace/sync', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: msg}),
+  });
+  document.getElementById('syncDialog').close();
+  if (res.ok) {
+    alert('Pushed to GitHub successfully.');
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert('Sync failed: ' + (data.detail || res.statusText));
+  }
+}
+
+async function logout() {
+  await fetch('/api/session', {method: 'DELETE'});
+  location.href = '/login';
+}
+</script>
+</body>
+</html>
