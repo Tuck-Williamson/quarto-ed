@@ -17,7 +17,7 @@ RUN wget -q "https://github.com/coder/code-server/releases/download/v${CODE_SERV
     && tar -xzf /tmp/code-server.tar.gz -C /opt/code-server --strip-components=1 \
     && rm /tmp/code-server.tar.gz
 
-# Quarto
+# Quarto (installs to /opt/quarto; binary at /opt/quarto/bin/quarto)
 RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.deb" \
         -O /tmp/quarto.deb \
     && dpkg -i /tmp/quarto.deb \
@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PATH="/opt/code-server/bin:/usr/local/bin:$PATH" \
+    PATH="/opt/code-server/bin:/opt/quarto/bin:/usr/local/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,8 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Artifacts from builder
 COPY --from=builder /opt/code-server /opt/code-server
 COPY --from=builder /opt/cs-extensions /opt/cs-extensions
-COPY --from=builder /usr/local/bin/quarto /usr/local/bin/quarto
-COPY --from=builder /usr/local/lib/quarto /usr/local/lib/quarto
+COPY --from=builder /opt/quarto /opt/quarto
 COPY --from=builder /usr/local/lib/python3.11/dist-packages \
                     /usr/local/lib/python3.11/dist-packages
 
