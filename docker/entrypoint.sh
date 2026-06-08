@@ -11,7 +11,7 @@ pidfile=/tmp/supervisord.pid
 loglevel=info
 
 [program:uvicorn]
-command=python3.11 -m uvicorn app.main:app --host 0.0.0.0 --port %(ENV_PORT)s --workers 1
+command=python3.11 -m uvicorn app.main:app --host 0.0.0.0 --port %(ENV_PORT)s --workers 1 --proxy-headers --forwarded-allow-ips=*
 directory=/app
 autostart=true
 autorestart=true
