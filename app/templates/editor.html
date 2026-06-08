@@ -77,10 +77,11 @@
 <div class="panel">
   <span>Load repo:</span>
   <input type="text" id="repoOwner" placeholder="owner"
-         value="{{ repo_owner }}">
+         value="{{ repo_owner or username }}">
   <span>/</span>
   <input type="text" id="repoName" placeholder="repo-name"
-         value="{{ repo_name }}">
+         value="{{ repo_name }}" list="repo-suggestions" autocomplete="off">
+  <datalist id="repo-suggestions"></datalist>
   <button class="btn btn-green" onclick="loadWorkspace()">Load</button>
   {% if has_workspace %}
   <span style="color:#3fb950; font-size:0.78rem;">
@@ -116,6 +117,16 @@
 </dialog>
 
 <script>
+async function loadRepos() {
+  try {
+    const res = await fetch('/api/repos');
+    if (!res.ok) return;
+    const { repos } = await res.json();
+    const dl = document.getElementById('repo-suggestions');
+    dl.innerHTML = repos.map(r => `<option value="${r}">`).join('');
+  } catch (_) {}
+}
+
 async function loadWorkspace() {
   const owner = document.getElementById('repoOwner').value.trim();
   const name  = document.getElementById('repoName').value.trim();
@@ -148,6 +159,8 @@ async function sync() {
     alert('Sync failed: ' + (data.detail || res.statusText));
   }
 }
+
+document.addEventListener('DOMContentLoaded', loadRepos);
 
 async function logout() {
   await fetch('/api/session', {method: 'DELETE'});

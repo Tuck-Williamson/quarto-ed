@@ -37,14 +37,30 @@ def _allocate_port() -> int:
     raise RuntimeError("No available ports for code-server")
 
 
-async def _wait_for_port(port: int, timeout: float = 15.0):
+async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: float = 60.0):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
+        # If the process already exited, capture stderr and fail fast
+        if proc.returncode is not None:
+            stderr_bytes = await proc.stderr.read() if proc.stderr else b""
+            raise RuntimeError(
+                f"code-server exited early (code {proc.returncode}): {stderr_bytes.decode()[:500]}"
+            )
         with socket.socket() as s:
             if s.connect_ex(("127.0.0.1", port)) == 0:
                 return
-        await asyncio.sleep(0.2)
-    raise TimeoutError(f"code-server did not start on port {port} within {timeout}s")
+        await asyncio.sleep(0.5)
+    # Timed out — read whatever stderr we have for diagnosis
+    stderr_bytes = b""
+    if proc.stderr:
+        try:
+            stderr_bytes = await asyncio.wait_for(proc.stderr.read(2048), timeout=1)
+        except asyncio.TimeoutError:
+            pass
+    raise TimeoutError(
+        f"code-server did not start on port {port} within {timeout}s. "
+        f"stderr: {stderr_bytes.decode()[:500]}"
+    )
 
 
 async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) -> int:
@@ -62,13 +78,13 @@ async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) 
         workspace_path,
         env={**os.environ, "HOME": os.path.join(_WORKSPACE_BASE, str(user_id))},
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
 
     _processes[user_id] = process
     _ports[user_id] = port
 
-    await _wait_for_port(port)
+    await _wait_for_port(port, process)
 
     async with get_db_session() as db:
         await db.execute(
@@ -102,6 +118,40 @@ async def _get_or_spawn(user_id: int, sess: Session) -> int:
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
     return await spawn_code_server(user_id, sess.workspace_path, sess.id)
+
+
+# ── Repos API ────────────────────────────────────────────────────────────────
+
+@router.get("/api/repos")
+async def list_repos(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    async with get_db_session() as db:
+        result = await db.execute(select(User).where(User.id == sess.user_id))
+        user = result.scalar_one_or_none()
+    access_token = decrypt_token(user.access_token_encrypted)
+    repos = []
+    page = 1
+    async with httpx.AsyncClient() as client:
+        while True:
+            resp = await client.get(
+                "https://api.github.com/user/repos",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                },
+                params={"per_page": 100, "page": page, "sort": "updated"},
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            repos.extend(r["name"] for r in batch)
+            if len(batch) < 100:
+                break
+            page += 1
+    return {"repos": repos}
 
 
 # ── Editor page ──────────────────────────────────────────────────────────────
