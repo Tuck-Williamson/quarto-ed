@@ -62,11 +62,14 @@ jobs:
 
       - name: Tag and push to Heroku registry
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        id: heroku_push
         run: |
           docker pull ${{ env.GHCR_IMAGE }}:latest
           docker tag  ${{ env.GHCR_IMAGE }}:latest \
                       registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
           docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+          IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web --format='{{.Id}}')
+          echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
 
       - name: Release to Heroku
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -76,4 +79,4 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
             -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
-            -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"${{ steps.build.outputs.digest }}\"}]}"
+            -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"${{ steps.heroku_push.outputs.image_id }}\"}]}"
