@@ -30,6 +30,13 @@ RUN mkdir -p /opt/cs-extensions \
         --install-extension quarto.quarto \
     || true
 
+# R (needed for Quarto knitr engine)
+RUN apt-get update && apt-get install -y --no-install-recommends r-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
+RUN /opt/quarto/bin/quarto install tinytex --no-prompt
+
 # Python dependencies
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
@@ -38,18 +45,20 @@ RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PATH="/opt/code-server/bin:/opt/quarto/bin:/usr/local/bin:$PATH" \
+    PATH="/opt/code-server/bin:/opt/quarto/bin:/root/.TinyTeX/bin/x86_64-linux:/usr/local/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3-pip supervisor git openssh-client \
         libsecret-1-0 libx11-6 libxkbfile1 ca-certificates \
+        r-base \
     && rm -rf /var/lib/apt/lists/*
 
 # Artifacts from builder
 COPY --from=builder /opt/code-server /opt/code-server
 COPY --from=builder /opt/cs-extensions /opt/cs-extensions
 COPY --from=builder /opt/quarto /opt/quarto
+COPY --from=builder /root/.TinyTeX /root/.TinyTeX
 COPY --from=builder /usr/local/lib/python3.11/dist-packages \
                     /usr/local/lib/python3.11/dist-packages
 
