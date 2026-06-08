@@ -109,6 +109,10 @@ async def kill_code_server(user_id: int):
             await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
             proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                pass
 
 
 async def _get_or_spawn(user_id: int, sess: Session) -> int:
@@ -354,6 +358,8 @@ async def ws_proxy(websocket: WebSocket, path: str):
     accept_subprotocol = subprotocols[0] if subprotocols else None
     await websocket.accept(subprotocol=accept_subprotocol)
 
+    _closed = (WebSocketDisconnect, websockets.exceptions.ConnectionClosed)
+
     try:
         async with websockets.connect(
             upstream_url,
@@ -362,23 +368,31 @@ async def ws_proxy(websocket: WebSocket, path: str):
         ) as upstream_ws:
 
             async def to_upstream():
-                async for msg in websocket.iter_bytes():
-                    await upstream_ws.send(msg)
+                try:
+                    async for msg in websocket.iter_bytes():
+                        await upstream_ws.send(msg)
+                except _closed:
+                    pass
 
             async def to_client():
-                async for msg in upstream_ws:
-                    if isinstance(msg, bytes):
-                        await websocket.send_bytes(msg)
-                    else:
-                        await websocket.send_text(msg)
+                try:
+                    async for msg in upstream_ws:
+                        if isinstance(msg, bytes):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
+                except _closed:
+                    pass
 
-            done, pending = await asyncio.wait(
-                [asyncio.ensure_future(to_upstream()),
-                 asyncio.ensure_future(to_client())],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            tasks = [
+                asyncio.ensure_future(to_upstream()),
+                asyncio.ensure_future(to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
+            # Await cancelled/done tasks so exceptions are never "unretrieved"
+            await asyncio.gather(*pending, *done, return_exceptions=True)
 
-    except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+    except _closed:
         pass
