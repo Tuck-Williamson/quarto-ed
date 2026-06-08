@@ -1,6 +1,7 @@
 import os
 import secrets
 
+import httpx
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -91,11 +92,20 @@ async def github_callback(request: Request):
 
 @router.delete("/api/session")
 async def logout(request: Request):
-    from .proxy import kill_code_server
-
     sess = await get_current_session(request)
     if sess:
-        await kill_code_server(sess.user_id)
+        editor_url = os.environ.get("EDITOR_SERVICE_URL", "")
+        internal_token = os.environ.get("INTERNAL_TOKEN", "")
+        if editor_url and internal_token:
+            async with httpx.AsyncClient() as client:
+                try:
+                    await client.delete(
+                        f"{editor_url}/internal/cs/{sess.user_id}",
+                        headers={"X-Internal-Token": internal_token},
+                        timeout=3,
+                    )
+                except Exception:
+                    pass
         async with get_db_session() as db:
             result = await db.execute(select(Session).where(Session.id == sess.id))
             s = result.scalar_one_or_none()

@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+starlette
+authlib
+httpx
+websockets
+sqlalchemy[asyncio]
+asyncpg
+aiomysql
+python-multipart
+itsdangerous
+jinja2
+cryptography

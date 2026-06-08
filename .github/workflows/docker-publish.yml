@@ -7,10 +7,11 @@ on:
     branches: [main]
 
 env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  GHCR_BASE: ghcr.io/${{ github.repository }}
 
 jobs:
-  build-and-deploy:
+  build-auth:
+    name: Auth Service
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lowercase image name
-        run: echo "GHCR_IMAGE=$(echo '${{ env.GHCR_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        run: echo "GHCR_AUTH=$(echo '${{ env.GHCR_BASE }}' | tr '[:upper:]' '[:lower:]')-auth" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,25 +35,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.GHCR_IMAGE }}
-          tags: |
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push to ghcr.io
+      - name: Build and push auth image to ghcr.io
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.GHCR_AUTH }}:latest
+            ${{ env.GHCR_AUTH }}:${{ github.sha }}
+          cache-from: type=gha,scope=auth
+          cache-to: type=gha,mode=max,scope=auth
 
       - name: Log in to Heroku registry
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -60,22 +54,87 @@ jobs:
           echo "${{ secrets.HEROKU_API_KEY }}" | \
             docker login registry.heroku.com --username=_ --password-stdin
 
-      - name: Tag and push to Heroku registry
+      - name: Tag and push auth image to Heroku
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         id: heroku_push
         run: |
-          docker pull ${{ env.GHCR_IMAGE }}:latest
-          docker tag  ${{ env.GHCR_IMAGE }}:latest \
+          docker pull ${{ env.GHCR_AUTH }}:latest
+          docker tag  ${{ env.GHCR_AUTH }}:latest \
                       registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
           docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
           IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web --format='{{.Id}}')
           echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
 
-      - name: Release to Heroku
+      - name: Release auth service to Heroku
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           curl -fsS -X PATCH \
             "https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/formation" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
+            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
+            -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"${{ steps.heroku_push.outputs.image_id }}\"}]}"
+
+  build-editor:
+    name: Editor Service
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lowercase image name
+        run: echo "GHCR_EDITOR=$(echo '${{ env.GHCR_BASE }}' | tr '[:upper:]' '[:lower:]')-editor" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push editor image to ghcr.io
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.editor
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.GHCR_EDITOR }}:latest
+            ${{ env.GHCR_EDITOR }}:${{ github.sha }}
+          cache-from: type=gha,scope=editor
+          cache-to: type=gha,mode=max,scope=editor
+
+      - name: Log in to Heroku registry
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.HEROKU_API_KEY }}" | \
+            docker login registry.heroku.com --username=_ --password-stdin
+
+      - name: Tag and push editor image to Heroku
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        id: heroku_push
+        run: |
+          docker pull ${{ env.GHCR_EDITOR }}:latest
+          docker tag  ${{ env.GHCR_EDITOR }}:latest \
+                      registry.heroku.com/${{ secrets.HEROKU_EDITOR_APP_NAME }}/web
+          docker push registry.heroku.com/${{ secrets.HEROKU_EDITOR_APP_NAME }}/web
+          IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_EDITOR_APP_NAME }}/web --format='{{.Id}}')
+          echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
+
+      - name: Release editor service to Heroku
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          curl -fsS -X PATCH \
+            "https://api.heroku.com/apps/${{ secrets.HEROKU_EDITOR_APP_NAME }}/formation" \
             -H "Content-Type: application/json" \
             -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
             -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \

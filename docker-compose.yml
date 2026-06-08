@@ -10,8 +10,10 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
-  app:
-    build: .
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -21,6 +23,24 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       SECRET_KEY: ${SECRET_KEY}
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+      EDITOR_SERVICE_URL: http://editor:8001
+      INTERNAL_TOKEN: dev-internal-token
+    depends_on:
+      - db
+      - editor
+
+  editor:
+    build:
+      context: .
+      dockerfile: Dockerfile.editor
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      DATABASE_URL: postgresql+asyncpg://quartoed:quartoed@db:5432/quartoed
+      SECRET_KEY: ${SECRET_KEY}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+      INTERNAL_TOKEN: dev-internal-token
     depends_on:
       - db
     volumes:
