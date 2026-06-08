@@ -68,6 +68,9 @@ async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) 
     user_data_dir = os.path.join(_WORKSPACE_BASE, str(user_id), ".vscode")
     os.makedirs(user_data_dir, exist_ok=True)
 
+    cs_env = {k: v for k, v in os.environ.items() if k != "PORT"}
+    cs_env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
+
     process = await asyncio.create_subprocess_exec(
         "/opt/code-server/bin/code-server",
         "--bind-addr", f"127.0.0.1:{port}",
@@ -76,7 +79,7 @@ async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) 
         "--extensions-dir", "/opt/cs-extensions",
         "--user-data-dir", user_data_dir,
         workspace_path,
-        env={**os.environ, "HOME": os.path.join(_WORKSPACE_BASE, str(user_id))},
+        env=cs_env,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
