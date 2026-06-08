@@ -115,9 +115,9 @@ async def editor(request: Request):
         result = await db.execute(select(User).where(User.id == sess.user_id))
         user = result.scalar_one_or_none()
     return templates.TemplateResponse(
+        request,
         "editor.html",
         {
-            "request": request,
             "username": user.username if user else "",
             "has_workspace": bool(sess.workspace_path),
             "repo_owner": sess.repo_owner or "",

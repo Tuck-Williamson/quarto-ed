@@ -47,7 +47,7 @@ async def login_page(request: Request):
     sess = await get_current_session(request)
     if sess:
         return RedirectResponse("/editor")
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html")
 
 
 @router.get("/auth/github")
