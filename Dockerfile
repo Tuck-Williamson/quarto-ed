@@ -1,12 +1,12 @@
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS builder
 
-ARG QUARTO_VERSION=1.7.32
+ARG QUARTO_VERSION=1.9.38
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        wget curl ca-certificates dpkg python3.11 python3-pip \
+        wget curl ca-certificates dpkg python3.11 python3-pip libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
 # Quarto (installs to /opt/quarto; binary at /opt/quarto/bin/quarto)
@@ -44,7 +44,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3-pip git openssh-client ca-certificates \
-        supervisor r-base \
+        supervisor r-base libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
 # Artifacts from builder
