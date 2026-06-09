@@ -1,0 +1,20 @@
+---
+title: "Python Code Test"
+format: html
+---
+
+# Python Chunk Execution
+
+Basic arithmetic:
+
+```{python}
+x = 2 + 2
+print(x)
+```
+
+A simple list operation:
+
+```{python}
+data = [1, 2, 3, 4, 5]
+print(f"Sum: {sum(data)}, Mean: {sum(data)/len(data)}")
+```

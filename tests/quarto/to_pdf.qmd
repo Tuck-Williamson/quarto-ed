@@ -1,0 +1,21 @@
+---
+title: "PDF Render Test"
+author: "Test Suite"
+date: today
+format: pdf
+---
+
+# PDF Output
+
+This document tests PDF rendering via TinyTeX.
+
+A simple equation:
+$$\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}$$
+
+## Section
+
+Some body text to verify the PDF output has content.
+
+- Item one
+- Item two
+- Item three

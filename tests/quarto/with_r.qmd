@@ -1,0 +1,19 @@
+---
+title: "R Code Test"
+format: html
+---
+
+# R Chunk Execution
+
+Basic arithmetic:
+
+```{r}
+x <- 2 + 2
+print(x)
+```
+
+A simple data summary:
+
+```{r}
+summary(c(1, 2, 3, 4, 5))
+```

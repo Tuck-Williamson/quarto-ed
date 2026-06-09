@@ -16,8 +16,12 @@ RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUART
     && rm /tmp/quarto.deb
 
 # R (needed for Quarto knitr engine)
-RUN apt-get update && apt-get install -y --no-install-recommends r-base \
+RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev \
+        libcurl4-openssl-dev libssl-dev libxml2-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# R packages for knitr/rmarkdown code-chunk execution
+RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), repos='https://cloud.r-project.org/', quiet=TRUE)"
 
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt
@@ -35,7 +39,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3-pip git openssh-client ca-certificates \
-        supervisor r-base \
+        supervisor r-base libcurl4-openssl-dev libssl-dev libxml2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Artifacts from builder
@@ -43,6 +47,7 @@ COPY --from=builder /opt/quarto /opt/quarto
 COPY --from=builder /root/.TinyTeX /root/.TinyTeX
 COPY --from=builder /usr/local/lib/python3.11/dist-packages \
                     /usr/local/lib/python3.11/dist-packages
+COPY --from=builder /usr/lib/R/library /usr/lib/R/library
 
 COPY app /app/app
 COPY docker /app/docker
