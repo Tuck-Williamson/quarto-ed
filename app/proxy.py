@@ -676,8 +676,14 @@ async def preview_http(request: Request, path: str):
                     if k.lower() not in _STRIP_RESP_HEADERS}
     if "location" in resp_headers:
         loc = resp_headers["location"]
+        # Strip absolute quarto-origin prefix (http://127.0.0.1:PORT/...) → relative path
+        if loc.startswith("http://127.0.0.1:"):
+            loc = loc.split("/", 3)[3:]
+            loc = "/" + (loc[0] if loc else "")
+        # Prefix relative paths so they stay inside the proxy
         if loc.startswith("/") and not loc.startswith("/api/preview"):
-            resp_headers["location"] = f"/api/preview{loc}"
+            loc = f"/api/preview{loc}"
+        resp_headers["location"] = loc
 
     return Response(
         content=upstream.content,
@@ -739,6 +745,15 @@ async def preview_ws(websocket: WebSocket, path: str):
                         if isinstance(msg, bytes):
                             await websocket.send_bytes(msg)
                         else:
+                            # Rewrite quarto's "reload/path" messages so the path
+                            # includes our /api/preview/ proxy prefix.  Without this
+                            # the live-reload JS navigates to the raw quarto path
+                            # (e.g. "/") which escapes the proxy entirely.
+                            if isinstance(msg, str) and msg.startswith("reload"):
+                                tail = msg[len("reload"):]
+                                if tail and not tail.startswith("/api/preview"):
+                                    tail = "/api/preview" + tail
+                                msg = "reload" + tail
                             await websocket.send_text(msg)
                 except _closed:
                     pass

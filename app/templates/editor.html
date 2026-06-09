@@ -751,13 +751,34 @@ window.switchPanel = (name) => {
 };
 
 // ── Preview ────────────────────────────────────────────────────────────────
+let _previewActive = false;
+
 window.loadPreview = () => {
+  _previewActive = true;
   document.getElementById("preview-frame").src = "/api/preview/";
 };
 window.reloadPreview = () => {
   const f = document.getElementById("preview-frame");
   f.src = f.src;
 };
+
+// Guard: if quarto's live-reload navigates the iframe outside /api/preview/,
+// redirect it back so the editor UI never appears inside the pane.
+document.getElementById("preview-frame").addEventListener("load", function () {
+  if (!_previewActive) return;
+  try {
+    const loc = this.contentWindow.location;
+    if (loc.href === "about:blank") return;
+    if (!loc.pathname.startsWith("/api/preview/")) {
+      // Navigation escaped the proxy (e.g. quarto sent a reload path without
+      // the /api/preview/ prefix).  Fall back to the proxy root so we never
+      // show the editor UI or a 404 inside the preview pane.
+      this.src = "/api/preview/";
+    }
+  } catch (_) {
+    // Cross-origin frame — can't inspect, leave it alone
+  }
+});
 
 // ── Workspace ops ──────────────────────────────────────────────────────────
 async function loadRepos() {
