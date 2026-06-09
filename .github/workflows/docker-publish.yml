@@ -59,7 +59,7 @@ jobs:
 
       # ── Image vulnerability scan (runs against the built image) ────────
       - name: Security scan – trivy (image)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: app:ci
           format: table
