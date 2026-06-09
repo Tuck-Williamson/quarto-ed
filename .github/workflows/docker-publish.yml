@@ -32,9 +32,13 @@ jobs:
 
       - name: Install R and R packages
         run: |
-          sudo apt-get install -y --no-install-recommends r-base r-base-dev \
-            libcurl4-openssl-dev libssl-dev libxml2-dev
-          sudo Rscript -e "install.packages(c('knitr', 'rmarkdown'), repos='https://cloud.r-project.org/', quiet=TRUE)"
+          sudo apt-get install -y --no-install-recommends r-base
+          # Use Posit Package Manager for pre-built Linux binaries (avoids source compilation)
+          sudo Rscript -e "install.packages(
+            c('knitr', 'rmarkdown'),
+            repos = 'https://packagemanager.posit.co/cran/__linux__/noble/latest',
+            quiet = TRUE
+          )"
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt -r requirements-test.txt

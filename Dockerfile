@@ -16,12 +16,12 @@ RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUART
     && rm /tmp/quarto.deb
 
 # R (needed for Quarto knitr engine)
-RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev \
-        libcurl4-openssl-dev libssl-dev libxml2-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends r-base \
     && rm -rf /var/lib/apt/lists/*
 
-# R packages for knitr/rmarkdown code-chunk execution
-RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), repos='https://cloud.r-project.org/', quiet=TRUE)"
+# R packages for knitr/rmarkdown code-chunk execution.
+# Use Posit Package Manager for pre-built Linux binaries (bookworm = Debian 12).
+RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), repos='https://packagemanager.posit.co/cran/__linux__/bookworm/latest', quiet=TRUE)"
 
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt
@@ -39,7 +39,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3-pip git openssh-client ca-certificates \
-        supervisor r-base libcurl4-openssl-dev libssl-dev libxml2-dev \
+        supervisor r-base \
     && rm -rf /var/lib/apt/lists/*
 
 # Artifacts from builder
