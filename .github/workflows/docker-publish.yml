@@ -66,6 +66,7 @@ jobs:
           exit-code: 1
           severity: CRITICAL
           ignore-unfixed: true
+          trivyignores: .trivyignore
 
       # ── Run test suite inside the production image ──────────────────────
       - name: Build test image (extends production + pytest deps)
