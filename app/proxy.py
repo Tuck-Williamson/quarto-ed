@@ -684,7 +684,7 @@ async def get_preview_logs(request: Request):
 
 # ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
 
-_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding", "accept-encoding"}
 _STRIP_RESP_HEADERS = {"host", "connection", "transfer-encoding", "content-encoding", "content-length"}
 
 
