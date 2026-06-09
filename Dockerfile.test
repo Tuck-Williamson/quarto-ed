@@ -1,0 +1,16 @@
+# Extends the production image with test dependencies and the test suite.
+# The production image is never modified — this layer is only used in CI.
+ARG BASE_IMAGE=app:ci
+FROM $BASE_IMAGE
+
+# Test-only Python dependencies (pytest, pytest-asyncio, httpx, aiosqlite)
+COPY requirements-test.txt /tmp/requirements-test.txt
+RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements-test.txt
+
+# Copy test suite and config
+COPY tests /app/tests
+COPY pytest.ini /app/pytest.ini
+
+WORKDIR /app
+
+CMD ["python3.11", "-m", "pytest", "tests/", "--tb=short", "-q"]
