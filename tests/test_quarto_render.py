@@ -40,13 +40,9 @@ def _jupyter_available() -> bool:
 
 
 def _has_tinytex() -> bool:
-    if shutil.which("quarto") is None:
-        return False
-    result = subprocess.run(
-        ["quarto", "check", "latex"],
-        capture_output=True, text=True, timeout=30,
-    )
-    return result.returncode == 0
+    # quarto check latex is not a valid subcommand; check for pdflatex instead,
+    # which TinyTeX places on PATH via /root/.TinyTeX/bin/x86_64-linux/pdflatex.
+    return shutil.which("pdflatex") is not None
 
 
 r_available = pytest.mark.skipif(not _r_available(), reason="R (Rscript) not installed")
