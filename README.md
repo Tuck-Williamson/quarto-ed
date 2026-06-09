@@ -1,13 +1,14 @@
 # quarto-ed
 
-A SaaS service for editing [Quarto](https://quarto.org) documents in a browser-based VSCode environment (code-server), authenticated via GitHub OAuth2.
+A SaaS service for editing [Quarto](https://quarto.org) documents in a browser-based web editor, authenticated via GitHub OAuth2.
 
 ## Architecture
 
-- **FastAPI** — auth, workspace API, HTTP + WebSocket proxy to code-server
-- **code-server** — VSCode in the browser with the Quarto extension pre-installed
+- **FastAPI** — auth, workspace API, file API, settings API, AI chat (SSE), preview proxy
+- **CodeMirror 6** — web editor with Markdown + code chunk syntax highlighting, CTRL+Space snippet engine
+- **Quarto preview** — per-user `quarto preview` subprocess; browser preview streams live via HTTP+WS proxy
 - **GitHub OAuth2** — user authentication; repos loaded using the user's access token
-- **PostgreSQL or MySQL** — session and user storage (configured via `DATABASE_URL`)
+- **MySQL** — session and user storage (configured via `DATABASE_URL`)
 - **Docker + Heroku** — single container, deployed via GitHub Actions → ghcr.io → Heroku
 
 ## Quick start (local)
@@ -25,6 +26,8 @@ GITHUB_CLIENT_ID=your_client_id
 GITHUB_CLIENT_SECRET=your_client_secret
 SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 TOKEN_ENCRYPTION_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+# Optional — enables AI writing assistant:
+# ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 **3. Run**
@@ -40,22 +43,15 @@ Visit `http://localhost:8000`.
 **One-time setup:**
 
 ```bash
-# Create the app and set container stack
 heroku create <app-name>
 heroku stack:set container --app <app-name>
-
-# Option A: Heroku-managed PostgreSQL
-heroku addons:create heroku-postgresql:essential-0 --app <app-name>
-
-# Option B: External database (Supabase, Neon, RDS, etc.)
-heroku config:set DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db --app <app-name>
-
-# Required secrets
 heroku config:set \
+  DATABASE_URL=mysql+aiomysql://user:pass@host:3306/db \
   GITHUB_CLIENT_ID=<id> \
   GITHUB_CLIENT_SECRET=<secret> \
   SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
   TOKEN_ENCRYPTION_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") \
+  ANTHROPIC_API_KEY=<key> \
   --app <app-name>
 ```
 
@@ -72,16 +68,16 @@ Push to `main` to trigger a build and deploy.
 | Variable | Required | Description |
 |---|---|---|
 | `PORT` | Set by Heroku | Port uvicorn listens on |
-| `DATABASE_URL` | Yes | SQLAlchemy connection URL (postgres or mysql) |
+| `DATABASE_URL` | Yes | SQLAlchemy async URL (`mysql+aiomysql://` or `postgresql+asyncpg://`) |
 | `GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client ID |
 | `GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
 | `SECRET_KEY` | Yes | 32-byte hex string for session cookie signing |
 | `TOKEN_ENCRYPTION_KEY` | Yes | Fernet key for encrypting GitHub tokens at rest |
-| `CODE_SERVER_PORT_MIN` | No (default 8100) | Start of internal port range for code-server |
-| `CODE_SERVER_PORT_MAX` | No (default 8200) | End of internal port range (max 100 concurrent users) |
+| `ANTHROPIC_API_KEY` | No | Enables AI writing assistant panel |
+| `AI_MODEL` | No (default `claude-sonnet-4-6`) | Claude model ID for AI chat |
 | `WORKSPACE_BASE` | No (default `/workspace`) | Base path for user workspaces |
 
 ## Known limitations
 
 - **Ephemeral filesystem**: workspace files are lost on dyno restart. Use **Sync to GitHub** before closing.
-- **Single worker**: max ~100 concurrent users per dyno (one code-server per user, ports 8100–8200).
+- **Single worker**: process state (quarto preview port/pid) is in-memory; multiple uvicorn workers not supported.

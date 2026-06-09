@@ -6,166 +6,945 @@
   <title>quarto-ed</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+      --border: #30363d; --text: #c9d1d9; --text2: #8b949e;
+      --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+      --yellow: #e3b341;
+    }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-           background: #0d1117; color: #c9d1d9; display: flex;
-           flex-direction: column; height: 100vh; overflow: hidden; }
+           background: var(--bg); color: var(--text);
+           display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
+    /* ── Top bar ── */
     .topbar {
-      display: flex; align-items: center; gap: 1rem;
-      padding: 0 1rem; height: 42px; min-height: 42px;
-      background: #161b22; border-bottom: 1px solid #30363d;
-      flex-shrink: 0;
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0 0.75rem; height: 40px; min-height: 40px;
+      background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
     .topbar .logo { font-weight: 700; font-size: 0.9rem; color: #f0f6fc; }
+    .topbar .repo-label { font-size: 0.78rem; color: var(--text2); }
     .topbar .spacer { flex: 1; }
-    .topbar .user { font-size: 0.8rem; color: #8b949e; }
-
     .btn {
-      font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.8rem;
-      border-radius: 5px; border: 1px solid #30363d; cursor: pointer;
-      background: #21262d; color: #c9d1d9; text-decoration: none;
-      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.75rem; font-weight: 600; padding: 0.25rem 0.65rem;
+      border-radius: 5px; border: 1px solid var(--border); cursor: pointer;
+      background: var(--bg3); color: var(--text); display: inline-flex;
+      align-items: center; gap: 0.3rem; text-decoration: none; white-space: nowrap;
     }
-    .btn:hover { background: #30363d; }
+    .btn:hover { background: var(--border); }
     .btn-green { background: #238636; border-color: #238636; color: #fff; }
     .btn-green:hover { background: #2ea043; }
     .btn-red { background: #6e2222; border-color: #6e2222; color: #fff; }
     .btn-red:hover { background: #8a2222; }
+    .btn-ghost { background: transparent; border-color: transparent; }
+    .btn-ghost:hover { background: var(--bg3); }
 
-    .panel {
-      background: #161b22; border-bottom: 1px solid #30363d;
-      padding: 0.75rem 1rem; font-size: 0.83rem;
-      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-      flex-shrink: 0;
-    }
-    .panel input[type=text] {
-      background: #0d1117; border: 1px solid #30363d; border-radius: 5px;
-      color: #c9d1d9; padding: 0.3rem 0.6rem; font-size: 0.82rem; width: 180px;
-    }
-    .panel input[type=text]:focus { outline: none; border-color: #58a6ff; }
+    /* ── Three-pane layout ── */
+    .layout { display: flex; flex: 1; overflow: hidden; }
 
-    .warning-banner {
-      background: #2d1a00; border-bottom: 1px solid #6e4c00;
-      padding: 0.4rem 1rem; font-size: 0.78rem; color: #e3b341; flex-shrink: 0;
+    /* ── Left sidebar (file browser) ── */
+    .sidebar {
+      width: 220px; min-width: 150px; flex-shrink: 0;
+      background: var(--bg2); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .sidebar.collapsed { width: 0; min-width: 0; border-right: none; }
+    .sidebar-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+      font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+      color: var(--text2); flex-shrink: 0;
+    }
+    .file-tree { flex: 1; overflow-y: auto; padding: 0.3rem 0; font-size: 0.8rem; }
+    .tree-item { display: flex; align-items: center; gap: 0.3rem;
+                 padding: 0.18rem 0.5rem; cursor: pointer; user-select: none; }
+    .tree-item:hover { background: var(--bg3); }
+    .tree-item.active { background: rgba(88,166,255,0.15); color: var(--accent); }
+    .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; }
+    .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-dir > .tree-children { padding-left: 1rem; }
+    .tree-children.hidden { display: none; }
+    .sidebar-footer { padding: 0.4rem 0.5rem; border-top: 1px solid var(--border);
+                      display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+    /* ── Editor area ── */
+    .editor-area {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+    }
+    .tabs-bar {
+      display: flex; align-items: center; overflow-x: auto;
+      background: var(--bg2); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; scrollbar-width: none;
+    }
+    .tabs-bar::-webkit-scrollbar { display: none; }
+    .tab {
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0.3rem 0.75rem; font-size: 0.78rem; cursor: pointer;
+      border-right: 1px solid var(--border); white-space: nowrap;
+      color: var(--text2); flex-shrink: 0;
+    }
+    .tab:hover { background: var(--bg3); }
+    .tab.active { background: var(--bg); color: var(--text);
+                  border-bottom: 2px solid var(--accent); }
+    .tab .dirty { color: var(--yellow); font-size: 0.65rem; }
+    .tab .close-btn { opacity: 0.5; font-size: 0.7rem; }
+    .tab:hover .close-btn { opacity: 1; }
+    .tab .close-btn:hover { color: var(--red); }
+    #cm-host { flex: 1; overflow: hidden; }
+    #cm-host .cm-editor { height: 100%; }
+    #cm-host .cm-scroller { overflow: auto; }
+    .no-file-msg {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--text2); font-size: 0.85rem; flex-direction: column; gap: 0.5rem;
     }
 
-    iframe {
-      flex: 1; border: none; width: 100%; display: block;
+    /* ── Right panel ── */
+    .right-panel {
+      width: 380px; min-width: 260px; flex-shrink: 0;
+      background: var(--bg2); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
     }
+    .right-panel.collapsed { width: 0; min-width: 0; border-left: none; }
+    .panel-tabs {
+      display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .panel-tab {
+      flex: 1; padding: 0.4rem; font-size: 0.75rem; font-weight: 600;
+      text-align: center; cursor: pointer; color: var(--text2);
+      border: none; background: none;
+    }
+    .panel-tab:hover { background: var(--bg3); }
+    .panel-tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+    .panel-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .panel-pane { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+    .panel-pane.active { display: flex; }
 
+    /* Preview */
+    #preview-frame { flex: 1; border: none; width: 100%; }
+    .preview-toolbar {
+      padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+      font-size: 0.75rem;
+    }
+    .preview-note { color: var(--text2); font-size: 0.72rem; }
+
+    /* AI chat */
+    .ai-messages {
+      flex: 1; overflow-y: auto; padding: 0.75rem;
+      display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .ai-msg { font-size: 0.8rem; line-height: 1.5; }
+    .ai-msg.user { color: var(--accent); }
+    .ai-msg.assistant { color: var(--text); white-space: pre-wrap; }
+    .ai-msg.assistant code { background: var(--bg3); padding: 0.1em 0.3em;
+                              border-radius: 3px; font-size: 0.9em; }
+    .ai-msg.assistant pre { background: var(--bg3); padding: 0.5rem;
+                             border-radius: 4px; overflow-x: auto; margin: 0.3rem 0; }
+    .ai-input-bar {
+      padding: 0.5rem; border-top: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 0.4rem; flex-shrink: 0;
+    }
+    .ai-input-bar textarea {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+      color: var(--text); padding: 0.4rem 0.5rem; font-size: 0.8rem;
+      resize: none; font-family: inherit; line-height: 1.4;
+    }
+    .ai-input-bar textarea:focus { outline: none; border-color: var(--accent); }
+    .ai-input-row { display: flex; align-items: center; gap: 0.4rem; }
+    .ai-context-check { font-size: 0.72rem; color: var(--text2); display: flex;
+                        align-items: center; gap: 0.3rem; cursor: pointer; }
+    .ai-context-check input { cursor: pointer; }
+
+    /* Settings */
+    .settings-scroll { flex: 1; overflow-y: auto; padding: 0.75rem; }
+    .settings-section { margin-bottom: 1.2rem; }
+    .settings-section h4 {
+      font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+      color: var(--text2); margin-bottom: 0.5rem; letter-spacing: 0.05em;
+    }
+    .settings-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 0.5rem; gap: 0.5rem;
+    }
+    .settings-label { font-size: 0.8rem; }
+    .settings-row input[type=range] { width: 100px; }
+    .settings-row input[type=number] { width: 60px; }
+    .settings-row select, .settings-row input[type=number] {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); padding: 0.2rem 0.4rem; font-size: 0.78rem;
+    }
+    .snippets-editor { margin-top: 0.5rem; }
+    .snippet-item {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.5rem; margin-bottom: 0.4rem; font-size: 0.75rem;
+    }
+    .snippet-item input, .snippet-item textarea {
+      width: 100%; background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 3px; color: var(--text); padding: 0.2rem 0.4rem;
+      font-size: 0.75rem; margin-top: 0.2rem; font-family: monospace;
+    }
+    .snippet-item textarea { resize: vertical; min-height: 50px; }
+    .snippet-del { float: right; color: var(--red); cursor: pointer;
+                   font-size: 0.7rem; border: none; background: none; padding: 0; }
+    .settings-save-indicator { font-size: 0.72rem; color: var(--green); opacity: 0;
+                                transition: opacity 0.5s; }
+    .settings-save-indicator.show { opacity: 1; }
+
+    /* Dialogs */
     dialog {
-      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-      color: #c9d1d9; padding: 1.5rem; min-width: 320px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); padding: 1.5rem; min-width: 340px; max-width: 90vw;
     }
     dialog h3 { margin-bottom: 1rem; font-size: 1rem; }
-    dialog input { width: 100%; margin-bottom: 1rem; }
-    dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+    dialog p { font-size: 0.85rem; color: var(--text2); margin-bottom: 1rem; line-height: 1.5; }
+    dialog .field { margin-bottom: 0.75rem; }
+    dialog .field label { display: block; font-size: 0.78rem; margin-bottom: 0.3rem;
+                           color: var(--text2); }
+    dialog .field input[type=text] {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--text); padding: 0.35rem 0.6rem;
+      font-size: 0.82rem;
+    }
+    dialog .field input[type=text]:focus { outline: none; border-color: var(--accent); }
+    dialog datalist option { background: var(--bg2); }
+    dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+
+    /* Toggle switch */
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: var(--border); border-radius: 20px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: ""; position: absolute; width: 14px; height: 14px;
+      left: 3px; top: 3px; background: white; border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+    /* Misc */
+    .warn-banner {
+      background: #2d1a00; border-bottom: 1px solid #6e4c00;
+      padding: 0.35rem 0.75rem; font-size: 0.75rem; color: var(--yellow); flex-shrink: 0;
+    }
+    #font-size-val { width: 24px; text-align: right; font-size: 0.75rem; }
+
+    /* Light theme */
+    body.light {
+      --bg: #ffffff; --bg2: #f6f8fa; --bg3: #eaeef2;
+      --border: #d0d7de; --text: #1f2328; --text2: #636c76;
+      --accent: #0969da;
+    }
   </style>
 </head>
-<body>
+<body class="{{ 'dark' if True else 'light' }}">
 
+<!-- Top bar -->
 <div class="topbar">
   <span class="logo">quarto-ed</span>
-  <div class="spacer"></div>
-  <span class="user">{{ username }}</span>
-  <button class="btn btn-green" onclick="document.getElementById('syncDialog').showModal()">
-    ↑ Sync to GitHub
-  </button>
-  <button class="btn btn-red" onclick="logout()">Sign out</button>
-</div>
-
-<div class="panel">
-  <span>Load repo:</span>
-  <input type="text" id="repoOwner" placeholder="owner"
-         value="{{ repo_owner or username }}">
-  <span>/</span>
-  <input type="text" id="repoName" placeholder="repo-name"
-         value="{{ repo_name }}" list="repo-suggestions" autocomplete="off">
-  <datalist id="repo-suggestions"></datalist>
-  <button class="btn btn-green" onclick="loadWorkspace()">Load</button>
+  <button class="btn btn-ghost" onclick="toggleSidebar()" title="Toggle file browser">☰</button>
   {% if has_workspace %}
-  <span style="color:#3fb950; font-size:0.78rem;">
-    ✓ {{ repo_owner }}/{{ repo_name }}
-  </span>
+  <span class="repo-label">{{ repo_owner }}/{{ repo_name }}</span>
   {% endif %}
+  <div class="spacer"></div>
+  <span id="save-indicator" style="font-size:0.72rem;color:var(--green);opacity:0;transition:opacity 0.5s">Saved</span>
+  <button class="btn btn-green" onclick="document.getElementById('syncDialog').showModal()">↑ Sync</button>
+  <button class="btn" onclick="document.getElementById('loadDialog').showModal()">⊞ Load repo</button>
+  <button class="btn btn-ghost" onclick="toggleRightPanel()">◧</button>
+  <span style="font-size:0.78rem;color:var(--text2)">{{ username }}</span>
+  <button class="btn btn-red btn-ghost" onclick="logout()">Sign out</button>
 </div>
 
 {% if not has_workspace %}
-<div class="warning-banner">
-  ⚠ No workspace loaded — enter a GitHub repo above and click Load to start editing.
-</div>
+<div class="warn-banner">⚠ No workspace loaded — click "Load repo" to clone a GitHub repo and start editing.</div>
 {% endif %}
 
-<div class="warning-banner">
-  ⚠ Unsaved changes are lost on server restart. Use <strong>Sync to GitHub</strong> before closing.
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span>Files</span>
+    </div>
+    <div class="file-tree" id="file-tree">
+      <div style="padding:0.5rem;color:var(--text2);font-size:0.75rem">
+        {% if has_workspace %}Loading…{% else %}No workspace loaded{% endif %}
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="btn" style="font-size:0.72rem" onclick="newFilePrompt()">+ New file</button>
+    </div>
+  </div>
+
+  <!-- Editor area -->
+  <div class="editor-area">
+    <div class="tabs-bar" id="tabs-bar"></div>
+    <div id="cm-host"></div>
+    {% if not has_workspace %}
+    <div class="no-file-msg" id="no-file-msg">
+      <span style="font-size:2rem">📄</span>
+      <span>Load a repo, then open a file from the sidebar</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Right panel -->
+  <div class="right-panel" id="right-panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" onclick="switchPanel('preview')">Preview</button>
+      {% if ai_enabled %}<button class="panel-tab" onclick="switchPanel('ai')">AI</button>{% endif %}
+      <button class="panel-tab" onclick="switchPanel('settings')">Settings</button>
+    </div>
+    <div class="panel-content">
+
+      <!-- Preview -->
+      <div class="panel-pane active" id="panel-preview">
+        <div class="preview-toolbar">
+          <button class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
+          <button class="btn btn-ghost" onclick="reloadPreview()" style="font-size:0.72rem" title="Reload">↺</button>
+          <span class="preview-note">Auto-reloads on save</span>
+        </div>
+        <iframe id="preview-frame" src="about:blank" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+      </div>
+
+      <!-- AI -->
+      {% if ai_enabled %}
+      <div class="panel-pane" id="panel-ai">
+        <div class="ai-messages" id="ai-messages">
+          <div class="ai-msg assistant" style="color:var(--text2)">
+            Ask me to help write, edit, or improve your Quarto document.
+          </div>
+        </div>
+        <div class="ai-input-bar">
+          <textarea id="ai-input" rows="3" placeholder="Ask the AI…"
+                    onkeydown="aiKeydown(event)"></textarea>
+          <div class="ai-input-row">
+            <label class="ai-context-check">
+              <input type="checkbox" id="ai-context"> Include current file
+            </label>
+            <div class="spacer" style="flex:1"></div>
+            <button class="btn btn-green" onclick="sendAIMessage()" style="font-size:0.72rem">Send ↵</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Settings -->
+      <div class="panel-pane" id="panel-settings">
+        <div class="settings-scroll">
+          <div class="settings-section">
+            <h4>Editor</h4>
+            <div class="settings-row">
+              <span class="settings-label">Theme</span>
+              <select id="s-theme" onchange="onSettingChange()">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Font size <span id="font-size-val">14</span></span>
+              <input type="range" id="s-fontSize" min="10" max="22" step="1" value="14"
+                     oninput="document.getElementById('font-size-val').textContent=this.value;onSettingChange()">
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Tab size</span>
+              <select id="s-tabSize" onchange="onSettingChange()">
+                <option value="2">2</option>
+                <option value="4">4</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Word wrap</span>
+              <label class="toggle"><input type="checkbox" id="s-wordWrap" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Auto-save</span>
+              <label class="toggle"><input type="checkbox" id="s-autoSave" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Auto-save delay (ms)</span>
+              <input type="number" id="s-autoSaveDelay" min="500" max="10000" step="500" value="2000" onchange="onSettingChange()">
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Vim keybindings</span>
+              <label class="toggle"><input type="checkbox" id="s-vimMode" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h4>Custom snippets <span style="color:var(--text2);font-weight:400;text-transform:none">(CTRL+Space)</span></h4>
+            <div class="snippets-editor" id="snippets-editor"></div>
+            <button class="btn" style="font-size:0.72rem;margin-top:0.4rem" onclick="addSnippet()">+ Add snippet</button>
+          </div>
+          <div style="text-align:right">
+            <span class="settings-save-indicator" id="settings-saved">✓ Saved to GitHub</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
 </div>
 
-{% if has_workspace %}
-<iframe id="editor-frame" src="/proxy/" allow="clipboard-read; clipboard-write"></iframe>
-{% else %}
-<iframe id="editor-frame" srcdoc="<html><body style='background:#0d1117'></body></html>"></iframe>
-{% endif %}
-
-<dialog id="syncDialog">
-  <h3>Sync to GitHub</h3>
-  <input type="text" id="commitMsg" placeholder="Commit message"
-         value="Sync from quarto-ed" class="panel input" style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;padding:0.3rem 0.6rem;font-size:0.82rem;width:100%;margin-bottom:1rem;">
+<!-- Load repo dialog -->
+<dialog id="loadDialog">
+  <h3>Load repository</h3>
+  <div class="field">
+    <label>Owner</label>
+    <input type="text" id="repoOwner" value="{{ repo_owner or username }}" placeholder="owner">
+  </div>
+  <div class="field">
+    <label>Repository</label>
+    <input type="text" id="repoName" value="{{ repo_name }}" placeholder="repo-name"
+           list="repo-suggestions" autocomplete="off">
+    <datalist id="repo-suggestions"></datalist>
+  </div>
   <div class="actions">
-    <button class="btn" onclick="document.getElementById('syncDialog').close()">Cancel</button>
-    <button class="btn btn-green" onclick="sync()">Push to GitHub</button>
+    <button class="btn" onclick="document.getElementById('loadDialog').close()">Cancel</button>
+    <button class="btn btn-green" onclick="loadWorkspace()">Load</button>
   </div>
 </dialog>
 
-<script>
+<!-- Sync dialog -->
+<dialog id="syncDialog">
+  <h3>Sync to GitHub</h3>
+  <div class="field">
+    <label>Commit message</label>
+    <input type="text" id="commitMsg" value="Sync from quarto-ed">
+  </div>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('syncDialog').close()">Cancel</button>
+    <button class="btn btn-green" onclick="syncWorkspace()">Push to GitHub</button>
+  </div>
+</dialog>
+
+<!-- Settings repo first-time dialog -->
+<dialog id="settingsRepoDialog">
+  <h3>Save your settings</h3>
+  <p>Create a private GitHub repo <strong id="settings-repo-name"></strong> to persist your editor preferences and custom snippets across sessions.</p>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('settingsRepoDialog').close()">Skip for now</button>
+    <button class="btn btn-green" onclick="createSettingsRepo()">Create repo</button>
+  </div>
+</dialog>
+
+<script type="module">
+// ── CodeMirror 6 imports ───────────────────────────────────────────────────
+import { EditorView, basicSetup } from "https://esm.sh/codemirror@6.0.1";
+import { EditorState } from "https://esm.sh/@codemirror/state@6";
+import { markdown, markdownLanguage } from "https://esm.sh/@codemirror/lang-markdown@6";
+import { languages } from "https://esm.sh/@codemirror/language-data@6";
+import { oneDark } from "https://esm.sh/@codemirror/theme-one-dark@6";
+import { EditorView as EV } from "https://esm.sh/@codemirror/view@6";
+import { autocompletion, snippetCompletion, startCompletion,
+         completionKeymap } from "https://esm.sh/@codemirror/autocomplete@6";
+import { keymap } from "https://esm.sh/@codemirror/view@6";
+import { indentWithTab } from "https://esm.sh/@codemirror/commands@6";
+
+// ── State ──────────────────────────────────────────────────────────────────
+let cmView = null;
+let currentFile = null;
+const openTabs = new Map(); // path → {content, dirty, state}
+let settings = {
+  theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
+  autoSave: true, autoSaveDelay: 2000, vimMode: false
+};
+let userSnippets = [];
+let settingsSaveTimer = null;
+let autoSaveTimer = null;
+
+// ── Built-in snippets ──────────────────────────────────────────────────────
+const BUILTIN_SNIPPETS = [
+  snippetCompletion("```{r}\n#{code}\n```", { label: "r-chunk", detail: "R code chunk", type: "text" }),
+  snippetCompletion("```{r}\n#| label: #{id}\n#| echo: #{false}\n#| fig.cap: \"#{caption}\"\n\n#{code}\n```",
+    { label: "r-chunk-opts", detail: "R chunk with label + options", type: "text" }),
+  snippetCompletion("```{python}\n#{code}\n```", { label: "py-chunk", detail: "Python code chunk", type: "text" }),
+  snippetCompletion("```{bash}\n#{code}\n```", { label: "bash-chunk", detail: "Bash code chunk", type: "text" }),
+  snippetCompletion("::: {.callout-note}\n## #{Note}\n#{content}\n:::", { label: "callout-note", detail: "Note callout block", type: "text" }),
+  snippetCompletion("::: {.callout-warning}\n## #{Warning}\n#{content}\n:::", { label: "callout-warning", detail: "Warning callout", type: "text" }),
+  snippetCompletion("::: {.callout-tip}\n## #{Tip}\n#{content}\n:::", { label: "callout-tip", detail: "Tip callout", type: "text" }),
+  snippetCompletion("::: {.callout-important}\n## #{Important}\n#{content}\n:::", { label: "callout-important", detail: "Important callout", type: "text" }),
+  snippetCompletion("::: {.callout-caution}\n## #{Caution}\n#{content}\n:::", { label: "callout-caution", detail: "Caution callout", type: "text" }),
+  snippetCompletion("::: {.panel-tabset}\n## #{Tab 1}\n#{content 1}\n\n## #{Tab 2}\n#{content 2}\n:::",
+    { label: "tabset", detail: "Panel tabset (tabs)", type: "text" }),
+  snippetCompletion(":::: {layout-ncol=2}\n::: {}\n#{left column}\n:::\n::: {}\n#{right column}\n:::\n::::",
+    { label: "columns", detail: "Two-column layout", type: "text" }),
+  snippetCompletion("![#{caption}](#{path.png}){#fig-#{id} width=\"#{80%}\"}",
+    { label: "figure", detail: "Figure with cross-reference", type: "text" }),
+  snippetCompletion("---\ntitle: \"#{Title}\"\nauthor: \"#{Author}\"\ndate: today\nformat:\n  html:\n    toc: true\n    code-fold: true\n    theme: #{cosmo}\n---",
+    { label: "yaml-html", detail: "HTML document front matter", type: "text" }),
+  snippetCompletion("---\ntitle: \"#{Title}\"\nauthor: \"#{Author}\"\ndate: today\nformat:\n  pdf:\n    geometry: margin=1in\n    fontsize: #{11pt}\n---",
+    { label: "yaml-pdf", detail: "PDF document front matter", type: "text" }),
+  snippetCompletion("---\ntitle: \"#{Title}\"\nauthor: \"#{Author}\"\nformat:\n  revealjs:\n    theme: #{dark}\n    slide-number: true\n---",
+    { label: "yaml-revealjs", detail: "Reveal.js slides front matter", type: "text" }),
+  snippetCompletion("---\ntitle: \"#{Chapter Title}\"\n---",
+    { label: "yaml-chapter", detail: "Quarto book chapter header", type: "text" }),
+];
+
+function allCompletions(context) {
+  const word = context.matchBefore(/\S*/);
+  if (!word && !context.explicit) return null;
+  const userC = userSnippets.map(s =>
+    snippetCompletion(s.template || "", { label: s.label, detail: s.detail || "custom snippet", type: "text" })
+  );
+  return {
+    from: word ? word.from : context.pos,
+    options: BUILTIN_SNIPPETS.concat(userC),
+    validFor: /\S*/,
+  };
+}
+
+// ── Editor initialisation ──────────────────────────────────────────────────
+function makeExtensions() {
+  return [
+    basicSetup,
+    markdown({ codeLanguages: languages }),
+    settings.theme === "dark" ? oneDark : [],
+    autocompletion({ override: [allCompletions], activateOnTyping: false }),
+    keymap.of([
+      indentWithTab,
+      { key: "Ctrl-s", run: () => { saveCurrentFile(); return true; } },
+      { key: "Ctrl-Space", run: startCompletion },
+    ]),
+    EV.lineWrapping,
+    EV.updateListener.of(update => {
+      if (update.docChanged && currentFile) {
+        markDirty(currentFile);
+        scheduleAutoSave();
+      }
+    }),
+    EditorState.tabSize.of(settings.tabSize),
+    ...(settings.wordWrap ? [] : [EV.lineWrapping]),
+  ].flat();
+}
+
+function initEditor(content = "") {
+  const host = document.getElementById("cm-host");
+  if (cmView) {
+    cmView.destroy();
+    cmView = null;
+  }
+  cmView = new EditorView({
+    state: EditorState.create({ doc: content, extensions: makeExtensions() }),
+    parent: host,
+  });
+}
+
+function rebuildEditor() {
+  const content = cmView ? cmView.state.doc.toString() : "";
+  const sel = cmView ? cmView.state.selection : null;
+  initEditor(content);
+  if (sel && cmView) {
+    try { cmView.dispatch({ selection: sel }); } catch (_) {}
+  }
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function renderTabs() {
+  const bar = document.getElementById("tabs-bar");
+  bar.innerHTML = "";
+  for (const [path, tab] of openTabs) {
+    const name = path.split("/").pop();
+    const div = document.createElement("div");
+    div.className = "tab" + (path === currentFile ? " active" : "");
+    div.innerHTML = `<span class="name">${name}</span>
+      <span class="dirty">${tab.dirty ? "●" : ""}</span>
+      <span class="close-btn" data-path="${path}" title="Close">✕</span>`;
+    div.querySelector(".name").addEventListener("click", () => switchToFile(path));
+    div.querySelector(".close-btn").addEventListener("click", e => {
+      e.stopPropagation(); closeTab(path);
+    });
+    bar.appendChild(div);
+  }
+  document.getElementById("cm-host").style.display = openTabs.size ? "flex" : "none";
+  const noMsg = document.getElementById("no-file-msg");
+  if (noMsg) noMsg.style.display = openTabs.size ? "none" : "flex";
+}
+
+function markDirty(path) {
+  const tab = openTabs.get(path);
+  if (tab && !tab.dirty) { tab.dirty = true; renderTabs(); }
+}
+
+function switchToFile(path) {
+  if (currentFile === path) return;
+  if (currentFile && cmView) {
+    openTabs.get(currentFile).state = cmView.state;
+  }
+  currentFile = path;
+  const tab = openTabs.get(path);
+  if (tab.state) {
+    if (!cmView) initEditor("");
+    cmView.setState(tab.state);
+  } else {
+    initEditor(tab.content);
+    openTabs.get(path).state = cmView.state;
+  }
+  renderTabs();
+}
+
+function closeTab(path) {
+  openTabs.delete(path);
+  if (currentFile === path) {
+    currentFile = openTabs.size ? [...openTabs.keys()].pop() : null;
+    if (currentFile) switchToFile(currentFile);
+    else if (cmView) { cmView.destroy(); cmView = null; }
+  }
+  renderTabs();
+}
+
+// ── File browser ───────────────────────────────────────────────────────────
+async function loadFileTree() {
+  const res = await fetch("/api/files");
+  if (!res.ok) return;
+  const { tree } = await res.json();
+  renderTree(tree, document.getElementById("file-tree"));
+}
+
+function renderTree(nodes, container) {
+  container.innerHTML = "";
+  if (!nodes.length) {
+    container.innerHTML = '<div style="padding:0.5rem;color:var(--text2);font-size:0.75rem">Empty</div>';
+    return;
+  }
+  for (const node of nodes) {
+    if (node.type === "dir") {
+      const wrapper = document.createElement("div");
+      wrapper.className = "tree-dir";
+      const header = document.createElement("div");
+      header.className = "tree-item";
+      header.innerHTML = `<span class="icon">▸</span><span class="name">${node.name}/</span>`;
+      const children = document.createElement("div");
+      children.className = "tree-children hidden";
+      renderTree(node.children || [], children);
+      header.addEventListener("click", () => {
+        const collapsed = children.classList.toggle("hidden");
+        header.querySelector(".icon").textContent = collapsed ? "▸" : "▾";
+      });
+      wrapper.appendChild(header);
+      wrapper.appendChild(children);
+      container.appendChild(wrapper);
+    } else {
+      const item = document.createElement("div");
+      item.className = "tree-item" + (node.path === currentFile ? " active" : "");
+      item.innerHTML = `<span class="icon">📄</span><span class="name">${node.name}</span>`;
+      item.addEventListener("click", () => openFile(node.path));
+      container.appendChild(item);
+    }
+  }
+}
+
+async function openFile(path) {
+  if (openTabs.has(path)) { switchToFile(path); return; }
+  const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+  if (!res.ok) { alert("Cannot open file"); return; }
+  const { content } = await res.json();
+  openTabs.set(path, { content, dirty: false, state: null });
+  switchToFile(path);
+  await loadFileTree();
+}
+
+async function saveCurrentFile() {
+  if (!currentFile || !cmView) return;
+  const content = cmView.state.doc.toString();
+  const res = await fetch("/api/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: currentFile, content }),
+  });
+  if (res.ok) {
+    const tab = openTabs.get(currentFile);
+    if (tab) { tab.dirty = false; tab.content = content; }
+    renderTabs();
+    flashIndicator("save-indicator");
+  }
+}
+
+function scheduleAutoSave() {
+  if (!settings.autoSave) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(saveCurrentFile, settings.autoSaveDelay);
+}
+
+// ── Sidebar / panels ───────────────────────────────────────────────────────
+window.toggleSidebar = () => document.getElementById("sidebar").classList.toggle("collapsed");
+window.toggleRightPanel = () => document.getElementById("right-panel").classList.toggle("collapsed");
+
+window.switchPanel = (name) => {
+  document.querySelectorAll(".panel-tab").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".panel-pane").forEach(p => p.classList.remove("active"));
+  const btn = [...document.querySelectorAll(".panel-tab")].find(b =>
+    b.textContent.trim().toLowerCase() === name.toLowerCase() ||
+    b.getAttribute("onclick")?.includes(`'${name}'`)
+  );
+  if (btn) btn.classList.add("active");
+  const pane = document.getElementById(`panel-${name}`);
+  if (pane) pane.classList.add("active");
+};
+
+// ── Preview ────────────────────────────────────────────────────────────────
+window.loadPreview = () => {
+  document.getElementById("preview-frame").src = "/api/preview/";
+};
+window.reloadPreview = () => {
+  const f = document.getElementById("preview-frame");
+  f.src = f.src;
+};
+
+// ── Workspace ops ──────────────────────────────────────────────────────────
 async function loadRepos() {
   try {
-    const res = await fetch('/api/repos');
+    const res = await fetch("/api/repos");
     if (!res.ok) return;
     const { repos } = await res.json();
-    const dl = document.getElementById('repo-suggestions');
-    dl.innerHTML = repos.map(r => `<option value="${r}">`).join('');
+    const dl = document.getElementById("repo-suggestions");
+    dl.innerHTML = repos.map(r => `<option value="${r}">`).join("");
   } catch (_) {}
 }
 
-async function loadWorkspace() {
-  const owner = document.getElementById('repoOwner').value.trim();
-  const name  = document.getElementById('repoName').value.trim();
-  if (!owner || !name) { alert('Enter both owner and repo name.'); return; }
-  const res = await fetch('/api/workspace/load', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({repo_owner: owner, repo_name: name}),
+window.loadWorkspace = async () => {
+  const owner = document.getElementById("repoOwner").value.trim();
+  const name = document.getElementById("repoName").value.trim();
+  if (!owner || !name) { alert("Enter both owner and repo name."); return; }
+  const res = await fetch("/api/workspace/load", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo_owner: owner, repo_name: name }),
   });
   if (res.ok) {
+    document.getElementById("loadDialog").close();
     location.reload();
   } else {
-    const data = await res.json().catch(() => ({}));
-    alert('Failed to load workspace: ' + (data.detail || res.statusText));
+    const d = await res.json().catch(() => ({}));
+    alert("Load failed: " + (d.detail || res.statusText));
   }
-}
+};
 
-async function sync() {
-  const msg = document.getElementById('commitMsg').value.trim() || 'Sync from quarto-ed';
-  const res = await fetch('/api/workspace/sync', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({message: msg}),
+window.syncWorkspace = async () => {
+  const msg = document.getElementById("commitMsg").value.trim() || "Sync from quarto-ed";
+  const res = await fetch("/api/workspace/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: msg }),
   });
-  document.getElementById('syncDialog').close();
-  if (res.ok) {
-    alert('Pushed to GitHub successfully.');
-  } else {
-    const data = await res.json().catch(() => ({}));
-    alert('Sync failed: ' + (data.detail || res.statusText));
+  document.getElementById("syncDialog").close();
+  if (res.ok) { alert("Pushed to GitHub successfully."); }
+  else {
+    const d = await res.json().catch(() => ({}));
+    alert("Sync failed: " + (d.detail || res.statusText));
+  }
+};
+
+window.newFilePrompt = async () => {
+  const path = prompt("New file path (relative to repo root):");
+  if (!path) return;
+  const res = await fetch("/api/file/create", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (res.ok) { await loadFileTree(); await openFile(path); }
+  else { const d = await res.json().catch(() => ({})); alert(d.detail || "Create failed"); }
+};
+
+// ── AI chat ────────────────────────────────────────────────────────────────
+window.aiKeydown = (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAIMessage(); }
+};
+
+window.sendAIMessage = async () => {
+  const input = document.getElementById("ai-input");
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = "";
+
+  const msgs = document.getElementById("ai-messages");
+  msgs.innerHTML += `<div class="ai-msg user">You: ${escapeHtml(msg)}</div>`;
+  const reply = document.createElement("div");
+  reply.className = "ai-msg assistant";
+  msgs.appendChild(reply);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  const includeCtx = document.getElementById("ai-context")?.checked;
+  const context = includeCtx && currentFile && cmView
+    ? cmView.state.doc.toString() : null;
+
+  try {
+    const res = await fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg, context }),
+    });
+    if (!res.ok) { reply.textContent = "Error: " + res.statusText; return; }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        try {
+          const obj = JSON.parse(data);
+          if (obj.type === "content_block_delta" && obj.delta?.type === "text_delta") {
+            reply.textContent += obj.delta.text;
+            msgs.scrollTop = msgs.scrollHeight;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    reply.textContent = "Error: " + e.message;
+  }
+};
+
+// ── Settings ───────────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return;
+    const data = await res.json();
+    settings = { ...settings, ...data.settings };
+    userSnippets = data.snippets || [];
+    applySettings();
+    renderSnippetsEditor();
+    if (!data.repo_exists) {
+      const name = `{{ username }}-quarto-ed-settings`;
+      document.getElementById("settings-repo-name").textContent = name;
+      document.getElementById("settingsRepoDialog").showModal();
+    }
+  } catch (_) {}
+}
+
+function applySettings() {
+  document.getElementById("s-theme").value = settings.theme;
+  document.getElementById("s-fontSize").value = settings.fontSize;
+  document.getElementById("font-size-val").textContent = settings.fontSize;
+  document.getElementById("s-tabSize").value = String(settings.tabSize);
+  document.getElementById("s-wordWrap").checked = settings.wordWrap;
+  document.getElementById("s-autoSave").checked = settings.autoSave;
+  document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay;
+  document.getElementById("s-vimMode").checked = settings.vimMode;
+
+  document.body.className = settings.theme === "light" ? "light" : "";
+  if (cmView) {
+    document.getElementById("cm-host").style.fontSize = settings.fontSize + "px";
   }
 }
 
-document.addEventListener('DOMContentLoaded', loadRepos);
+window.onSettingChange = () => {
+  settings = {
+    theme: document.getElementById("s-theme").value,
+    fontSize: parseInt(document.getElementById("s-fontSize").value),
+    tabSize: parseInt(document.getElementById("s-tabSize").value),
+    wordWrap: document.getElementById("s-wordWrap").checked,
+    autoSave: document.getElementById("s-autoSave").checked,
+    autoSaveDelay: parseInt(document.getElementById("s-autoSaveDelay").value),
+    vimMode: document.getElementById("s-vimMode").checked,
+  };
+  applySettings();
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(persistSettings, 1500);
+};
 
-async function logout() {
-  await fetch('/api/session', {method: 'DELETE'});
-  location.href = '/login';
+async function persistSettings() {
+  const snippets = collectSnippets();
+  await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings, snippets }),
+  });
+  flashIndicator("settings-saved");
 }
+
+window.createSettingsRepo = async () => {
+  document.getElementById("settingsRepoDialog").close();
+  const res = await fetch("/api/settings/repo/create", { method: "POST" });
+  if (!res.ok) alert("Failed to create settings repo");
+  else await loadSettings();
+};
+
+// ── Snippets editor ────────────────────────────────────────────────────────
+function renderSnippetsEditor() {
+  const container = document.getElementById("snippets-editor");
+  container.innerHTML = "";
+  userSnippets.forEach((s, i) => {
+    const div = document.createElement("div");
+    div.className = "snippet-item";
+    div.innerHTML = `
+      <button class="snippet-del" onclick="deleteSnippet(${i})">✕ Remove</button>
+      <div><strong style="font-size:0.72rem">Label</strong>
+        <input type="text" class="snip-label" value="${escapeHtml(s.label || "")}" placeholder="trigger-word" oninput="onSettingChange()">
+      </div>
+      <div><strong style="font-size:0.72rem">Description</strong>
+        <input type="text" class="snip-detail" value="${escapeHtml(s.detail || "")}" placeholder="description" oninput="onSettingChange()">
+      </div>
+      <div><strong style="font-size:0.72rem">Template (use #{placeholder} for tabstops)</strong>
+        <textarea class="snip-template" rows="3" oninput="onSettingChange()">${escapeHtml(s.template || "")}</textarea>
+      </div>`;
+    container.appendChild(div);
+  });
+}
+
+window.addSnippet = () => {
+  userSnippets.push({ label: "", detail: "", template: "" });
+  renderSnippetsEditor();
+  onSettingChange();
+};
+
+window.deleteSnippet = (i) => {
+  userSnippets.splice(i, 1);
+  renderSnippetsEditor();
+  onSettingChange();
+};
+
+function collectSnippets() {
+  const items = document.querySelectorAll(".snippet-item");
+  return [...items].map(el => ({
+    label: el.querySelector(".snip-label")?.value || "",
+    detail: el.querySelector(".snip-detail")?.value || "",
+    template: el.querySelector(".snip-template")?.value || "",
+  })).filter(s => s.label);
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+                  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+function flashIndicator(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.opacity = "1";
+  setTimeout(() => { el.style.opacity = "0"; }, 2000);
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+window.logout = async () => {
+  await fetch("/api/session", { method: "DELETE" });
+  location.href = "/login";
+};
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", async () => {
+  const host = document.getElementById("cm-host");
+  host.style.cssText = "flex:1;overflow:hidden;display:none;";
+
+  await loadSettings();
+  loadRepos();
+
+  {% if has_workspace %}
+  await loadFileTree();
+  {% endif %}
+});
 </script>
 </body>
 </html>

@@ -91,11 +91,11 @@ async def github_callback(request: Request):
 
 @router.delete("/api/session")
 async def logout(request: Request):
-    from .proxy import kill_code_server
+    from .proxy import kill_quarto_preview
 
     sess = await get_current_session(request)
     if sess:
-        await kill_code_server(sess.user_id)
+        await kill_quarto_preview(sess.user_id)
         async with get_db_session() as db:
             result = await db.execute(select(Session).where(Session.id == sess.id))
             s = result.scalar_one_or_none()
