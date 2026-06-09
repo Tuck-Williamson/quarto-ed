@@ -16,8 +16,9 @@ RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUART
     && rm /tmp/quarto.deb
 
 # R (needed for Quarto knitr engine)
-# r-base-dev provides compilation tools as a fallback when RSPM binaries are unavailable.
-RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev \
+# r-base-dev: C/C++ toolchain for source compilation fallbacks.
+# libuv1-dev: required by the 'fs' R package (rmarkdown dep chain).
+RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev libuv1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # R packages for knitr/rmarkdown code-chunk execution.
