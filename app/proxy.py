@@ -1,56 +1,102 @@
 import asyncio
+import json
 import os
 import socket
 
 import httpx
 import websockets
 import websockets.exceptions
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 
 from .auth import get_current_session
 from .database import decrypt_token, get_db_session
 from .models import Session, User
-from .schemas import SyncRequest, WorkspaceLoadRequest
+from .schemas import (
+    AIChatRequest,
+    CommitRequest,
+    FileCreateRequest,
+    FileWriteRequest,
+    SettingsSaveRequest,
+    SyncRequest,
+    WorkspaceLoadRequest,
+)
 
 router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-_PORT_MIN = int(os.environ.get("CODE_SERVER_PORT_MIN", 8100))
-_PORT_MAX = int(os.environ.get("CODE_SERVER_PORT_MAX", 8200))
+_PORT_MIN = int(os.environ.get("PREVIEW_PORT_MIN", 8100))
+_PORT_MAX = int(os.environ.get("PREVIEW_PORT_MAX", 8200))
 _WORKSPACE_BASE = os.environ.get("WORKSPACE_BASE", "/workspace")
 
-_processes: dict[int, asyncio.subprocess.Process] = {}
-_ports: dict[int, int] = {}
+_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
+
+_AI_SYSTEM = (
+    "You are a writing and coding assistant for Quarto documents. "
+    "Quarto is a scientific and technical publishing system built on Pandoc. "
+    "Help the user write, edit, structure, and improve their Quarto documents. "
+    "When showing code, use Quarto's fenced code chunk syntax (```{r}, ```{python}, etc.). "
+    "Be concise. Format your responses in Markdown compatible with Quarto."
+)
+
+_SETTINGS_DEFAULTS = {
+    "theme": "dark",
+    "fontSize": 14,
+    "tabSize": 2,
+    "wordWrap": True,
+    "autoSave": True,
+    "autoSaveDelay": 2000,
+    "vimMode": False,
+    "commitMessage": "User saved.",
+}
+
+# ── Preview process state ────────────────────────────────────────────────────
+
+_preview_processes: dict[int, asyncio.subprocess.Process] = {}
+_preview_ports: dict[int, int] = {}
+_preview_logs: dict[int, list[str]] = {}
+_LOG_MAX_LINES = 500
+
+
+async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str = "") -> None:
+    try:
+        async for line in stream:
+            text = line.decode(errors="replace").rstrip()
+            buf = _preview_logs.setdefault(user_id, [])
+            buf.append(f"{prefix}{text}")
+            if len(buf) > _LOG_MAX_LINES:
+                del buf[:-_LOG_MAX_LINES]
+    except Exception:
+        pass
 
 
 def _allocate_port() -> int:
-    used = set(_ports.values())
+    used = set(_preview_ports.values())
     for port in range(_PORT_MIN, _PORT_MAX + 1):
         if port in used:
             continue
         with socket.socket() as s:
             if s.connect_ex(("127.0.0.1", port)) != 0:
                 return port
-    raise RuntimeError("No available ports for code-server")
+    raise RuntimeError("No available preview ports")
 
 
-async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: float = 60.0):
+async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: float = 120.0):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        # If the process already exited, capture stderr and fail fast
         if proc.returncode is not None:
             stderr_bytes = await proc.stderr.read() if proc.stderr else b""
             raise RuntimeError(
-                f"code-server exited early (code {proc.returncode}): {stderr_bytes.decode()[:500]}"
+                f"quarto preview exited early (code {proc.returncode}): "
+                f"{stderr_bytes.decode()[:500]}"
             )
         with socket.socket() as s:
             if s.connect_ex(("127.0.0.1", port)) == 0:
                 return
         await asyncio.sleep(0.5)
-    # Timed out — read whatever stderr we have for diagnosis
     stderr_bytes = b""
     if proc.stderr:
         try:
@@ -58,36 +104,34 @@ async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: f
         except asyncio.TimeoutError:
             pass
     raise TimeoutError(
-        f"code-server did not start on port {port} within {timeout}s. "
+        f"quarto preview did not start on port {port} within {timeout}s. "
         f"stderr: {stderr_bytes.decode()[:500]}"
     )
 
 
-async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) -> int:
+async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: int) -> int:
     port = _allocate_port()
-    user_data_dir = os.path.join(_WORKSPACE_BASE, str(user_id), ".vscode")
-    os.makedirs(user_data_dir, exist_ok=True)
-
-    cs_env = {k: v for k, v in os.environ.items() if k != "PORT"}
-    cs_env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
+    env = {k: v for k, v in os.environ.items() if k != "PORT"}
+    env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
 
     process = await asyncio.create_subprocess_exec(
-        "/opt/code-server/bin/code-server",
-        "--bind-addr", f"127.0.0.1:{port}",
-        "--auth", "none",
-        "--disable-workspace-trust",
-        "--extensions-dir", "/opt/cs-extensions",
-        "--user-data-dir", user_data_dir,
-        workspace_path,
-        env=cs_env,
-        stdout=asyncio.subprocess.DEVNULL,
+        "quarto", "preview", workspace_path,
+        "--port", str(port),
+        "--host", "127.0.0.1",
+        "--no-browser",
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
-    _processes[user_id] = process
-    _ports[user_id] = port
+    _preview_processes[user_id] = process
+    _preview_ports[user_id] = port
 
     await _wait_for_port(port, process)
+
+    _preview_logs[user_id] = []
+    asyncio.ensure_future(_pipe_reader(user_id, process.stdout))
+    asyncio.ensure_future(_pipe_reader(user_id, process.stderr))
 
     async with get_db_session() as db:
         await db.execute(
@@ -100,9 +144,10 @@ async def spawn_code_server(user_id: int, workspace_path: str, session_id: int) 
     return port
 
 
-async def kill_code_server(user_id: int):
-    proc = _processes.pop(user_id, None)
-    _ports.pop(user_id, None)
+async def kill_quarto_preview(user_id: int):
+    proc = _preview_processes.pop(user_id, None)
+    _preview_ports.pop(user_id, None)
+    _preview_logs.pop(user_id, None)
     if proc and proc.returncode is None:
         proc.terminate()
         try:
@@ -115,19 +160,105 @@ async def kill_code_server(user_id: int):
                 pass
 
 
-async def _get_or_spawn(user_id: int, sess: Session) -> int:
-    proc = _processes.get(user_id)
+async def _get_or_spawn_preview(user_id: int, sess: Session) -> int:
+    proc = _preview_processes.get(user_id)
     if proc and proc.returncode is None:
-        return _ports[user_id]
-    # Process is gone; clean up stale entry
-    _processes.pop(user_id, None)
-    _ports.pop(user_id, None)
+        return _preview_ports[user_id]
+    _preview_processes.pop(user_id, None)
+    _preview_ports.pop(user_id, None)
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
-    return await spawn_code_server(user_id, sess.workspace_path, sess.id)
+    return await spawn_quarto_preview(user_id, sess.workspace_path, sess.id)
 
 
-# ── Repos API ────────────────────────────────────────────────────────────────
+# ── Path safety ───────────────────────────────────────────────────────────────
+
+def _safe_path(workspace: str, rel: str) -> str:
+    """Resolve rel relative to workspace, raise 403 on traversal."""
+    full = os.path.realpath(os.path.join(workspace, rel.lstrip("/")))
+    root = os.path.realpath(workspace)
+    if full != root and not full.startswith(root + os.sep):
+        raise HTTPException(status_code=403, detail="Path traversal not allowed")
+    return full
+
+
+# ── Settings helpers ──────────────────────────────────────────────────────────
+
+def _settings_repo_local_path(username: str) -> str:
+    return os.path.join(_WORKSPACE_BASE, username, f"{username}-quarto-ed-settings")
+
+
+async def _ensure_settings_cloned(username: str, access_token: str) -> bool:
+    """Clone settings repo if not present locally. Returns True if available."""
+    local_path = _settings_repo_local_path(username)
+    if os.path.isdir(os.path.join(local_path, ".git")):
+        return True
+    clone_url = (
+        f"https://oauth2:{access_token}@github.com/"
+        f"{username}/{username}-quarto-ed-settings.git"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        "git", "clone", clone_url, local_path,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+    return proc.returncode == 0
+
+
+async def _settings_repo_exists_on_github(username: str, access_token: str) -> bool:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://api.github.com/repos/{username}/{username}-quarto-ed-settings",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+    return resp.status_code == 200
+
+
+async def _push_settings(local_path: str, message: str = "Update settings"):
+    for cmd in [
+        ["git", "-C", local_path, "add", "-A"],
+        ["git", "-C", local_path, "commit", "-m", message],
+        ["git", "-C", local_path, "push"],
+    ]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode != 0 and cmd[2] == "commit":
+            break  # nothing to commit is fine
+
+
+# ── Editor page ───────────────────────────────────────────────────────────────
+
+@router.get("/editor", response_class=HTMLResponse)
+async def editor(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        return RedirectResponse("/login")
+    async with get_db_session() as db:
+        result = await db.execute(select(User).where(User.id == sess.user_id))
+        user = result.scalar_one_or_none()
+    return templates.TemplateResponse(
+        request,
+        "editor.html",
+        {
+            "username": user.username if user else "",
+            "has_workspace": bool(sess.workspace_path),
+            "repo_owner": sess.repo_owner or "",
+            "repo_name": sess.repo_name or "",
+            "ai_enabled": bool(_ANTHROPIC_KEY),
+        },
+    )
+
+
+# ── Repos API ─────────────────────────────────────────────────────────────────
 
 @router.get("/api/repos")
 async def list_repos(request: Request):
@@ -159,28 +290,6 @@ async def list_repos(request: Request):
                 break
             page += 1
     return {"repos": repos}
-
-
-# ── Editor page ──────────────────────────────────────────────────────────────
-
-@router.get("/editor", response_class=HTMLResponse)
-async def editor(request: Request):
-    sess = await get_current_session(request)
-    if not sess:
-        return RedirectResponse("/login")
-    async with get_db_session() as db:
-        result = await db.execute(select(User).where(User.id == sess.user_id))
-        user = result.scalar_one_or_none()
-    return templates.TemplateResponse(
-        request,
-        "editor.html",
-        {
-            "username": user.username if user else "",
-            "has_workspace": bool(sess.workspace_path),
-            "repo_owner": sess.repo_owner or "",
-            "repo_name": sess.repo_name or "",
-        },
-    )
 
 
 # ── Workspace API ─────────────────────────────────────────────────────────────
@@ -244,8 +353,8 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         )
         await db.commit()
 
-    if sess.user_id in _processes:
-        await kill_code_server(sess.user_id)
+    if sess.user_id in _preview_processes:
+        await kill_quarto_preview(sess.user_id)
 
     return {"workspace_path": workspace_path}
 
@@ -270,36 +379,289 @@ async def sync_workspace(request: Request, body: SyncRequest):
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        # "nothing to commit" is exit code 1 from git commit — not a real error
         if proc.returncode != 0 and b"nothing to commit" not in stdout + stderr:
             raise HTTPException(status_code=500, detail=f"Command failed: {stderr.decode()}")
 
     return {"status": "ok"}
 
 
-# ── HTTP proxy ────────────────────────────────────────────────────────────────
+# ── File API ──────────────────────────────────────────────────────────────────
 
-_STRIP_HEADERS = {"host", "connection", "transfer-encoding"}
+def _build_tree(root: str, rel_base: str = "") -> list:
+    entries = []
+    try:
+        items = sorted(os.listdir(root))
+    except PermissionError:
+        return entries
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(root, name)
+        rel = os.path.join(rel_base, name) if rel_base else name
+        if os.path.isdir(full):
+            entries.append({"name": name, "path": rel, "type": "dir",
+                            "children": _build_tree(full, rel)})
+        else:
+            entries.append({"name": name, "path": rel, "type": "file"})
+    return entries
+
+
+@router.get("/api/files")
+async def list_files(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    return {"tree": _build_tree(sess.workspace_path)}
+
+
+@router.get("/api/file")
+async def read_file(request: Request, path: str = Query(...)):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        with open(full_path, encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=415, detail="Binary file not supported")
+    return {"path": path, "content": content}
+
+
+@router.post("/api/file")
+async def write_file(request: Request, body: FileWriteRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, body.path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(body.content)
+    return {"status": "ok"}
+
+
+@router.post("/api/file/create")
+async def create_file(request: Request, body: FileCreateRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, body.path)
+    if os.path.exists(full_path):
+        raise HTTPException(status_code=409, detail="File already exists")
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write("")
+    return {"status": "ok"}
+
+
+# ── Settings API ──────────────────────────────────────────────────────────────
+
+async def _get_user_and_token(sess: Session):
+    async with get_db_session() as db:
+        result = await db.execute(select(User).where(User.id == sess.user_id))
+        user = result.scalar_one_or_none()
+    return user, decrypt_token(user.access_token_encrypted)
+
+
+@router.get("/api/settings/repo/status")
+async def settings_repo_status(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    user, token = await _get_user_and_token(sess)
+    exists = await _settings_repo_exists_on_github(user.username, token)
+    return {"exists": exists}
+
+
+@router.post("/api/settings/repo/create")
+async def create_settings_repo(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    user, token = await _get_user_and_token(sess)
+    repo_name = f"{user.username}-quarto-ed-settings"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.github.com/user/repos",
+            json={"name": repo_name, "private": True, "auto_init": True},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+    if resp.status_code not in (201, 422):
+        raise HTTPException(status_code=502, detail="Failed to create GitHub repo")
+
+    await asyncio.sleep(2)
+
+    local_path = _settings_repo_local_path(user.username)
+    if not os.path.isdir(os.path.join(local_path, ".git")):
+        cloned = await _ensure_settings_cloned(user.username, token)
+        if not cloned:
+            raise HTTPException(status_code=502, detail="Failed to clone settings repo")
+
+    for cmd in [
+        ["git", "-C", local_path, "config", "user.email",
+         f"{user.username}@users.noreply.github.com"],
+        ["git", "-C", local_path, "config", "user.name", user.username],
+    ]:
+        p = await asyncio.create_subprocess_exec(*cmd)
+        await p.wait()
+
+    settings_file = os.path.join(local_path, "settings.json")
+    snippets_file = os.path.join(local_path, "snippets.json")
+    if not os.path.exists(settings_file):
+        with open(settings_file, "w") as f:
+            json.dump(_SETTINGS_DEFAULTS, f, indent=2)
+    if not os.path.exists(snippets_file):
+        with open(snippets_file, "w") as f:
+            json.dump([], f)
+
+    await _push_settings(local_path, "Initialize quarto-ed settings")
+    return {"status": "created"}
+
+
+@router.get("/api/settings")
+async def get_settings(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    user, token = await _get_user_and_token(sess)
+    local_path = _settings_repo_local_path(user.username)
+
+    if not os.path.isdir(os.path.join(local_path, ".git")):
+        cloned = await _ensure_settings_cloned(user.username, token)
+        if not cloned:
+            return {"settings": _SETTINGS_DEFAULTS, "snippets": [], "repo_exists": False}
+
+    settings = _SETTINGS_DEFAULTS.copy()
+    snippets: list = []
+    settings_file = os.path.join(local_path, "settings.json")
+    snippets_file = os.path.join(local_path, "snippets.json")
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file) as f:
+                settings = {**_SETTINGS_DEFAULTS, **json.load(f)}
+        except (json.JSONDecodeError, OSError):
+            pass
+    if os.path.exists(snippets_file):
+        try:
+            with open(snippets_file) as f:
+                snippets = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return {"settings": settings, "snippets": snippets, "repo_exists": True}
+
+
+@router.post("/api/settings")
+async def save_settings(request: Request, body: SettingsSaveRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    user, token = await _get_user_and_token(sess)
+    local_path = _settings_repo_local_path(user.username)
+
+    if not os.path.isdir(os.path.join(local_path, ".git")):
+        cloned = await _ensure_settings_cloned(user.username, token)
+        if not cloned:
+            return {"status": "no_repo"}
+
+    settings_file = os.path.join(local_path, "settings.json")
+    snippets_file = os.path.join(local_path, "snippets.json")
+    with open(settings_file, "w") as f:
+        json.dump(body.settings, f, indent=2)
+    if body.snippets is not None:
+        with open(snippets_file, "w") as f:
+            json.dump(body.snippets, f, indent=2)
+
+    await _push_settings(local_path)
+    return {"status": "ok"}
+
+
+# ── AI Chat ───────────────────────────────────────────────────────────────────
+
+@router.post("/api/ai/chat")
+async def ai_chat(request: Request, body: AIChatRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not _ANTHROPIC_KEY:
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    user_content = body.message
+    if body.context:
+        user_content = f"<document>\n{body.context}\n</document>\n\n{body.message}"
+
+    async def generate():
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": _ANTHROPIC_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": _AI_MODEL,
+                    "max_tokens": 4096,
+                    "stream": True,
+                    "system": _AI_SYSTEM,
+                    "messages": [{"role": "user", "content": user_content}],
+                },
+            ) as response:
+                async for chunk in response.aiter_text():
+                    yield chunk
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# ── Preview logs ─────────────────────────────────────────────────────────────
+
+@router.get("/api/preview/logs")
+async def get_preview_logs(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    running = (
+        sess.user_id in _preview_processes
+        and _preview_processes[sess.user_id].returncode is None
+    )
+    return {"lines": _preview_logs.get(sess.user_id, []), "running": running}
+
+
+# ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
+
+_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_RESP_HEADERS = {"host", "connection", "transfer-encoding", "content-encoding", "content-length"}
 
 
 @router.api_route(
-    "/proxy/{path:path}",
+    "/api/preview/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
 )
-async def http_proxy(request: Request, path: str):
+async def preview_http(request: Request, path: str):
     sess = await get_current_session(request)
     if not sess:
         return RedirectResponse("/login")
 
-    port = await _get_or_spawn(sess.user_id, sess)
+    port = await _get_or_spawn_preview(sess.user_id, sess)
     url = f"http://127.0.0.1:{port}/{path}"
     if request.url.query:
         url += f"?{request.url.query}"
 
-    headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in _STRIP_HEADERS
-    }
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP_REQ_HEADERS}
     body = await request.body()
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
@@ -310,11 +672,18 @@ async def http_proxy(request: Request, path: str):
             content=body,
         )
 
-    resp_headers = dict(upstream.headers)
+    resp_headers = {k: v for k, v in upstream.headers.items()
+                    if k.lower() not in _STRIP_RESP_HEADERS}
     if "location" in resp_headers:
         loc = resp_headers["location"]
-        if loc.startswith("/") and not loc.startswith("/proxy"):
-            resp_headers["location"] = f"/proxy{loc}"
+        # Strip absolute quarto-origin prefix (http://127.0.0.1:PORT/...) → relative path
+        if loc.startswith("http://127.0.0.1:"):
+            loc = loc.split("/", 3)[3:]
+            loc = "/" + (loc[0] if loc else "")
+        # Prefix relative paths so they stay inside the proxy
+        if loc.startswith("/") and not loc.startswith("/api/preview"):
+            loc = f"/api/preview{loc}"
+        resp_headers["location"] = loc
 
     return Response(
         content=upstream.content,
@@ -323,17 +692,14 @@ async def http_proxy(request: Request, path: str):
     )
 
 
-# ── WebSocket proxy ───────────────────────────────────────────────────────────
-
-@router.websocket("/proxy/{path:path}")
-async def ws_proxy(websocket: WebSocket, path: str):
+@router.websocket("/api/preview/{path:path}")
+async def preview_ws(websocket: WebSocket, path: str):
     token = websocket.session.get("session_token")
     if not token:
         await websocket.close(code=1008)
         return
 
     async with get_db_session() as db:
-        from sqlalchemy import select
         result = await db.execute(select(Session).where(Session.session_token == token))
         sess = result.scalar_one_or_none()
 
@@ -342,7 +708,7 @@ async def ws_proxy(websocket: WebSocket, path: str):
         return
 
     try:
-        port = await _get_or_spawn(sess.user_id, sess)
+        port = await _get_or_spawn_preview(sess.user_id, sess)
     except HTTPException:
         await websocket.close(code=1011)
         return
@@ -354,7 +720,6 @@ async def ws_proxy(websocket: WebSocket, path: str):
 
     subprotocols_header = websocket.headers.get("sec-websocket-protocol", "")
     subprotocols = [s.strip() for s in subprotocols_header.split(",") if s.strip()]
-
     accept_subprotocol = subprotocols[0] if subprotocols else None
     await websocket.accept(subprotocol=accept_subprotocol)
 
@@ -380,6 +745,15 @@ async def ws_proxy(websocket: WebSocket, path: str):
                         if isinstance(msg, bytes):
                             await websocket.send_bytes(msg)
                         else:
+                            # Rewrite quarto's "reload/path" messages so the path
+                            # includes our /api/preview/ proxy prefix.  Without this
+                            # the live-reload JS navigates to the raw quarto path
+                            # (e.g. "/") which escapes the proxy entirely.
+                            if isinstance(msg, str) and msg.startswith("reload"):
+                                tail = msg[len("reload"):]
+                                if tail and not tail.startswith("/api/preview"):
+                                    tail = "/api/preview" + tail
+                                msg = "reload" + tail
                             await websocket.send_text(msg)
                 except _closed:
                     pass
@@ -391,7 +765,6 @@ async def ws_proxy(websocket: WebSocket, path: str):
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
-            # Await cancelled/done tasks so exceptions are never "unretrieved"
             await asyncio.gather(*pending, *done, return_exceptions=True)
 
     except _closed:

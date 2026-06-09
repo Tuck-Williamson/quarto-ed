@@ -7,65 +7,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Copy `.env.example` (or create `.env`) with the required vars, then:
 
 ```bash
-docker compose up --build        # starts postgres + app on http://localhost:8000
-docker compose up --build app    # rebuild only the app container
-docker compose logs -f app       # tail app logs
+docker compose up --build          # starts postgres + app (port 8000)
+docker compose up --build app      # rebuild only the app container
+docker compose logs -f app         # tail app logs
 ```
 
-There is no test suite yet. Manual verification is done by running the stack and walking through the OAuth login → load repo → edit → sync flow.
+Required `.env` vars for local dev: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`. Optional: `ANTHROPIC_API_KEY` (enables AI chat), `AI_MODEL` (default `claude-sonnet-4-6`).
 
-To generate the two secret keys locally:
+To generate secret keys:
 ```bash
 python3 -c "import secrets; print(secrets.token_hex(32))"                          # SECRET_KEY
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # TOKEN_ENCRYPTION_KEY
 ```
 
+There is no test suite. Manual verification: OAuth login → load repo → edit → sync flow.
+
 ## Deployment
 
-Pushes to `main` are blocked — open a PR from a feature/fix branch. The GitHub Actions workflow (`.github/workflows/docker-publish.yml`) runs on merge to `main` and:
-1. Builds the Docker image with layer caching via GitHub Actions cache
-2. Pushes `latest` + SHA-tagged image to `ghcr.io/tuck-williamson/quarto-ed`
-3. Re-tags and pushes to `registry.heroku.com/quarto-ed/web`
-4. Releases to Heroku via the formation PATCH API using the image ID from `docker inspect` (not the ghcr.io digest — Heroku requires the ID from its own registry)
+Pushes to `main` are blocked — open a PR from a feature/fix branch. On merge to `main`, the GitHub Actions workflow (`.github/workflows/docker-publish.yml`) runs a single job:
 
-Required GitHub repo secrets: `HEROKU_API_KEY`, `HEROKU_APP_NAME`.
+- Builds `Dockerfile` → pushes to `ghcr.io/.../quarto-ed:latest` → re-tags to `registry.heroku.com/quarto-ed/web` → releases via Heroku formation PATCH API
 
-Heroku config vars are set via the Heroku dashboard or API — never committed. The app reads `DATABASE_URL` from the environment and normalizes the scheme at startup (`postgres://` → `postgresql+asyncpg://`, `mysql://` → `mysql+aiomysql://`). Heroku's `PORT` env var is used by uvicorn; it must be stripped from the environment before spawning code-server subprocesses (code-server also reads `PORT` and would otherwise collide).
+Heroku release uses `docker inspect --format='{{.Id}}'` after pushing to Heroku's registry — the image ID from Heroku's registry, not the ghcr.io digest.
+
+Required GitHub secrets: `HEROKU_API_KEY`, `HEROKU_APP_NAME` (= `quarto-ed`).
+
+Heroku config vars: `DATABASE_URL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SECRET_KEY`, `TOKEN_ENCRYPTION_KEY`, `ANTHROPIC_API_KEY` (optional), `AI_MODEL` (optional).
 
 ## Architecture
 
-The entire service runs in a single Docker container managed by supervisord. Supervisord runs one program: uvicorn (single worker). code-server processes are children of uvicorn, spawned dynamically per user at runtime — not managed by supervisord.
+Single Heroku app (`quarto-ed`, Standard-2X, 1 GB), single uvicorn worker:
 
 ```
-Browser → Heroku router ($PORT)
-            └── uvicorn (FastAPI, 1 worker)
-                  ├── /login  /auth/callback        app/auth.py
-                  ├── /editor  /api/*               app/proxy.py
-                  └── /proxy/{path}  (WS + HTTP)    app/proxy.py
-                        └── 127.0.0.1:8100-8200  (per-user code-server)
+Browser
+  │
+  ▼
+quarto-ed  (FastAPI — uvicorn 1 worker)
+  ├── /login  /auth/callback              app/auth.py
+  ├── /editor                             3-pane web editor SPA
+  ├── /api/repos                          list GitHub repos
+  ├── /api/workspace/load|sync            git clone/pull/push
+  ├── /api/files  /api/file               file browser + read/write/create
+  ├── /api/settings  /api/settings/repo   settings repo management
+  ├── /api/ai/chat  (SSE)  ─────────────▶ Anthropic API
+  └── /api/preview/{path}  (HTTP + WS)  ──▶ 127.0.0.1:8100-8200
+                                             per-user quarto preview
 ```
 
-**Per-user code-server lifecycle** (`app/proxy.py`):  
-Two module-level dicts (`_processes`, `_ports`) map `user_id → process/port`. `spawn_code_server()` allocates a free port (8100–8200), launches code-server as an asyncio subprocess with `--auth none --bind-addr 127.0.0.1:{port}`, polls until the port accepts connections (up to 60 s), then writes `cs_port`/`cs_pid` back to the `sessions` DB row. On dyno restart, the startup event nulls out all `cs_port`/`cs_pid` values since all processes are gone. Single worker is required because these dicts are in-process state.
+### Auth service (`app/auth.py`)
 
-**Proxy** (`app/proxy.py`):  
-HTTP requests are forwarded via `httpx.AsyncClient`. WebSocket connections use `websockets.connect()` with bidirectional `asyncio.gather` tasks; both tasks catch `ConnectionClosed`/`WebSocketDisconnect` internally, and both done+pending tasks are awaited via `gather(return_exceptions=True)` after the first completes to prevent "Task exception never retrieved" noise. `Sec-WebSocket-Protocol` subprotocols must be forwarded — VS Code's JSON-RPC protocol negotiation depends on this.
+GitHub OAuth2 via `authlib`. GitHub access token encrypted with Fernet (`TOKEN_ENCRYPTION_KEY`) before DB write. `TOKEN_ENCRYPTION_KEY` rotation invalidates stored tokens — users re-authenticate on next login.
 
-**Auth** (`app/auth.py`):  
-GitHub OAuth2 via `authlib`. The CSRF state is managed automatically by Starlette's `SessionMiddleware` (signed cookie, key = `SECRET_KEY`). On callback, the GitHub access token is encrypted with Fernet (`TOKEN_ENCRYPTION_KEY`) before being written to `users.access_token_encrypted`. It is decrypted only when needed (git clone URL construction, GitHub API calls). Rotating `TOKEN_ENCRYPTION_KEY` invalidates stored tokens; affected users re-authenticate on next login.
+### Proxy / editor (`app/proxy.py`)
 
-**Database** (`app/models.py`, `app/database.py`):  
-Two tables: `users` (github_id unique index, encrypted token) and `sessions` (session_token unique index, FK to users, cs_port, cs_pid, workspace_path). Schema is created via `Base.metadata.create_all` on startup (idempotent). No Alembic. `pool_pre_ping=True` handles idle connection drops from Bluehost MySQL's `wait_timeout`; `pool_recycle=1800` proactively replaces connections every 30 minutes.
+Owns all quarto preview lifecycle:
+- `spawn_quarto_preview(user_id, workspace_path, session_id)` — allocates port (8100–8200), runs `quarto preview {path} --port {port} --host 127.0.0.1 --no-browser`, strips `PORT` from env, polls until port accepts connections.
+- `kill_quarto_preview(user_id)` — terminate → kill with timeouts.
+- `_get_or_spawn_preview(user_id, sess)` — reuse live process or spawn fresh.
+- Preview HTTP/WS proxy: same `httpx` + `websockets` bidirectional pattern.
+- File API: `_safe_path()` prevents traversal; reads/writes UTF-8 text files.
+- Settings API: reads/writes `settings.json` + `snippets.json` in a per-user GitHub repo (`{username}-quarto-ed-settings`), auto-cloned on access, pushed on every save.
+- AI chat: streams Anthropic API via `httpx.AsyncClient.stream()` → `StreamingResponse(text/event-stream)`.
 
-**Templates**:  
-Starlette's Jinja2Templates. The new API (Starlette ≥ 0.36) requires `TemplateResponse(request, name, context)` — `request` is the first positional argument, not a key inside the context dict.
+### Editor SPA (`app/templates/editor.html`)
 
-**Workspace flow**:  
-`POST /api/workspace/load` clones the repo via `https://oauth2:{token}@github.com/...` into `/workspace/{username}/{repo}`, kills any running code-server for that user, and updates the session row. The editor iframe loads `/proxy/` which spawns code-server pointed at that directory. `POST /api/workspace/sync` runs `git add -A && git commit && git push`. Workspace is ephemeral (lost on dyno restart); the UI warns users and provides a Sync button.
+Three-pane layout (no build pipeline — CodeMirror 6 loaded via `esm.sh` CDN ESM):
+- **Left**: collapsible file browser (tree), "+ New file" button
+- **Center**: CodeMirror 6 editor with tabs, dirty indicator, CTRL+S to save
+- **Right**: switchable Preview (iframe → `/api/preview/`) / AI Chat (SSE) / Settings
+
+CTRL+Space triggers the snippet engine (`autocompletion` with custom `completionSource`). Built-in snippets: R/Python/Bash code chunks, 5 callout types, panel tabset, column layout, figure with cross-ref, 4 YAML front matter templates. User-defined custom snippets are persisted to the settings repo.
+
+Settings panel auto-pushes to the settings repo 1.5 s after any change. First-time users are prompted to create the settings repo via a modal.
+
+### Shared code
+
+`app/database.py`, `app/models.py`, `app/schemas.py`.
+
+### Database
+
+Two tables: `users` (github_id unique, encrypted access token) and `sessions` (session_token unique, FK to users, cs_port, cs_pid, workspace_path, repo_owner, repo_name). `cs_port`/`cs_pid` store the quarto preview port/pid. `pool_pre_ping=True` + `pool_recycle=1800` handle Bluehost MySQL's idle-connection drops.
+
+### Auth flow
+
+GitHub OAuth2 via `authlib`. On workspace load, auth service decrypts the token and uses it for git clone URLs and GitHub API calls (settings repo creation, repo listing).
 
 ## Key constraints
 
-- **Single uvicorn worker** — multi-worker would require moving process state to a shared store (Redis or DB).
-- **Heroku ephemeral filesystem** — `/workspace` is lost on every restart; users must sync to GitHub before closing.
-- **Memory ceiling** — code-server uses ~400 MB. The current Heroku plan (512 MB) is tight; switching repos causes a brief spike. Upgrade to Standard-2X (1 GB) is recommended, or split into separate auth and editor dynos.
-- **`PORT` stripping** — always strip `PORT` from the env dict passed to code-server subprocesses (`cs_env = {k: v for k, v in os.environ.items() if k != "PORT"}`).
+- **Single uvicorn worker** — process dicts (`_preview_processes`, `_preview_ports`) in `app/proxy.py` are in-process state; multiple workers would require a shared store.
+- **`PORT` stripping** — strip `PORT` from env before spawning quarto preview: `{k: v for k, v in os.environ.items() if k != "PORT"}`. Heroku sets `PORT`; quarto preview reads it and would otherwise bind on the wrong port.
+- **Heroku ephemeral filesystem** — `/workspace` on the dyno is lost on restart. Users must sync to GitHub before closing.
+- **Settings repo re-clone** — on dyno restart the local settings repo dir is gone; `GET /api/settings` re-clones it automatically if the GitHub repo exists.
