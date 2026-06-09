@@ -24,6 +24,10 @@ class SettingsSaveRequest(BaseModel):
     snippets: list | None = None
 
 
+class CommitRequest(BaseModel):
+    message: str = "User saved."
+
+
 class AIChatRequest(BaseModel):
     message: str
     context: str | None = None

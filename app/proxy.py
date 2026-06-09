@@ -16,6 +16,7 @@ from .database import decrypt_token, get_db_session
 from .models import Session, User
 from .schemas import (
     AIChatRequest,
+    CommitRequest,
     FileCreateRequest,
     FileWriteRequest,
     SettingsSaveRequest,
@@ -49,12 +50,27 @@ _SETTINGS_DEFAULTS = {
     "autoSave": True,
     "autoSaveDelay": 2000,
     "vimMode": False,
+    "commitMessage": "User saved.",
 }
 
 # ── Preview process state ────────────────────────────────────────────────────
 
 _preview_processes: dict[int, asyncio.subprocess.Process] = {}
 _preview_ports: dict[int, int] = {}
+_preview_logs: dict[int, list[str]] = {}
+_LOG_MAX_LINES = 500
+
+
+async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str = "") -> None:
+    try:
+        async for line in stream:
+            text = line.decode(errors="replace").rstrip()
+            buf = _preview_logs.setdefault(user_id, [])
+            buf.append(f"{prefix}{text}")
+            if len(buf) > _LOG_MAX_LINES:
+                del buf[:-_LOG_MAX_LINES]
+    except Exception:
+        pass
 
 
 def _allocate_port() -> int:
@@ -104,7 +120,7 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
         "--host", "127.0.0.1",
         "--no-browser",
         env=env,
-        stdout=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
@@ -112,6 +128,10 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
     _preview_ports[user_id] = port
 
     await _wait_for_port(port, process)
+
+    _preview_logs[user_id] = []
+    asyncio.ensure_future(_pipe_reader(user_id, process.stdout))
+    asyncio.ensure_future(_pipe_reader(user_id, process.stderr))
 
     async with get_db_session() as db:
         await db.execute(
@@ -127,6 +147,7 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
 async def kill_quarto_preview(user_id: int):
     proc = _preview_processes.pop(user_id, None)
     _preview_ports.pop(user_id, None)
+    _preview_logs.pop(user_id, None)
     if proc and proc.returncode is None:
         proc.terminate()
         try:
@@ -606,9 +627,24 @@ async def ai_chat(request: Request, body: AIChatRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+# ── Preview logs ─────────────────────────────────────────────────────────────
+
+@router.get("/api/preview/logs")
+async def get_preview_logs(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    running = (
+        sess.user_id in _preview_processes
+        and _preview_processes[sess.user_id].returncode is None
+    )
+    return {"lines": _preview_logs.get(sess.user_id, []), "running": running}
+
+
 # ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
 
-_STRIP_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_RESP_HEADERS = {"host", "connection", "transfer-encoding", "content-encoding", "content-length"}
 
 
 @router.api_route(
@@ -625,7 +661,7 @@ async def preview_http(request: Request, path: str):
     if request.url.query:
         url += f"?{request.url.query}"
 
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP_HEADERS}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP_REQ_HEADERS}
     body = await request.body()
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=30) as client:
@@ -636,7 +672,8 @@ async def preview_http(request: Request, path: str):
             content=body,
         )
 
-    resp_headers = dict(upstream.headers)
+    resp_headers = {k: v for k, v in upstream.headers.items()
+                    if k.lower() not in _STRIP_RESP_HEADERS}
     if "location" in resp_headers:
         loc = resp_headers["location"]
         if loc.startswith("/") and not loc.startswith("/api/preview"):
