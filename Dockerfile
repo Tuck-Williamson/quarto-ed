@@ -16,12 +16,16 @@ RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUART
     && rm /tmp/quarto.deb
 
 # R (needed for Quarto knitr engine)
-RUN apt-get update && apt-get install -y --no-install-recommends r-base \
+# r-base-dev provides compilation tools as a fallback when RSPM binaries are unavailable.
+RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # R packages for knitr/rmarkdown code-chunk execution.
-# Use Posit Package Manager for pre-built Linux binaries (bookworm = Debian 12).
-RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), repos='https://packagemanager.posit.co/cran/__linux__/bookworm/latest', quiet=TRUE)"
+# RSPM supplies pre-built binaries where available; r-base-dev handles source fallbacks.
+# The second Rscript call verifies installation — if either package is missing the build fails.
+RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), \
+      repos='https://packagemanager.posit.co/cran/__linux__/bookworm/latest')" \
+    && Rscript -e "stopifnot(all(c('knitr','rmarkdown') %in% installed.packages()[,'Package']))"
 
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt
