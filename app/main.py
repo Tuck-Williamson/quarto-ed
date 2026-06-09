@@ -12,14 +12,22 @@ from .proxy import router as proxy_router
 
 app = FastAPI(title="quarto-ed")
 
-app.add_middleware(SessionMiddleware, secret_key=os.environ["SECRET_KEY"])
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.environ.get("ALLOWED_ORIGIN", "*")],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    SessionMiddleware,
+    secret_key=os.environ["SECRET_KEY"],
+    https_only=os.environ.get("ENVIRONMENT") != "development",
+    same_site="lax",
 )
+
+_ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "")
+if _ALLOWED_ORIGIN:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[_ALLOWED_ORIGIN],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
+    )
 
 app.include_router(auth_router)
 app.include_router(proxy_router)

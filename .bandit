@@ -1,0 +1,3 @@
+[bandit]
+# B607: partial executable path — quarto/git/Rscript are resolved via PATH intentionally.
+skips = B607

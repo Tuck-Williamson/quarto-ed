@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import socket
 
 import httpx
@@ -30,6 +31,20 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 _PORT_MIN = int(os.environ.get("PREVIEW_PORT_MIN", 8100))
 _PORT_MAX = int(os.environ.get("PREVIEW_PORT_MAX", 8200))
 _WORKSPACE_BASE = os.environ.get("WORKSPACE_BASE", "/workspace")
+
+# Only these env vars are forwarded to the quarto subprocess. Using an
+# allowlist rather than a denylist ensures new secrets added to the server
+# environment are never accidentally exposed to user code chunks.
+_QUARTO_ENV_ALLOWLIST = frozenset({
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP",
+    "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+    "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+    "DENO_DIR", "QUARTO_DENO", "QUARTO_PYTHON",
+    "R_HOME", "R_LIBS", "R_LIBS_USER",
+    "USER", "USERNAME", "LOGNAME",
+})
+
+_GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
@@ -73,6 +88,31 @@ async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str =
         pass
 
 
+def _quarto_env(user_id: int) -> dict:
+    """Build a minimal env dict for the quarto subprocess.
+
+    Allowlist-based so new secrets added to the server env are never forwarded
+    to user code chunks (e.g. a Python block doing print(os.environ)).
+    """
+    env = {k: v for k, v in os.environ.items() if k in _QUARTO_ENV_ALLOWLIST}
+    env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
+    return env
+
+
+def _redact(text: str, *secrets: str) -> str:
+    """Replace each secret in text with '***'. Safe to call with empty strings."""
+    for s in secrets:
+        if s:
+            text = text.replace(s, "***")
+    return text
+
+
+def _validate_github_name(value: str, label: str) -> None:
+    """Raise 400 if value is not a safe GitHub owner/repo name."""
+    if not _GITHUB_NAME_RE.match(value) or ".." in value:
+        raise HTTPException(status_code=400, detail=f"Invalid {label}")
+
+
 def _allocate_port() -> int:
     used = set(_preview_ports.values())
     for port in range(_PORT_MIN, _PORT_MAX + 1):
@@ -111,15 +151,13 @@ async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: f
 
 async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: int) -> int:
     port = _allocate_port()
-    env = {k: v for k, v in os.environ.items() if k != "PORT"}
-    env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
 
     process = await asyncio.create_subprocess_exec(
         "quarto", "preview", workspace_path,
         "--port", str(port),
         "--host", "127.0.0.1",
         "--no-browser",
-        env=env,
+        env=_quarto_env(user_id),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -300,6 +338,9 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
     if not sess:
         raise HTTPException(status_code=401)
 
+    _validate_github_name(body.repo_owner, "repo_owner")
+    _validate_github_name(body.repo_name, "repo_name")
+
     async with get_db_session() as db:
         result = await db.execute(select(User).where(User.id == sess.user_id))
         user = result.scalar_one_or_none()
@@ -317,7 +358,7 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise HTTPException(status_code=400, detail=f"git pull failed: {stderr.decode()}")
+            raise HTTPException(status_code=400, detail=f"git pull failed: {_redact(stderr.decode(), access_token)}")
     else:
         clone_url = (
             f"https://oauth2:{access_token}@github.com/"
@@ -331,7 +372,7 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise HTTPException(status_code=400, detail=f"git clone failed: {stderr.decode()}")
+            raise HTTPException(status_code=400, detail=f"git clone failed: {_redact(stderr.decode(), access_token)}")
 
         for cmd in [
             ["git", "-C", workspace_path, "config", "user.email",
