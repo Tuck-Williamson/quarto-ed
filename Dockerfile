@@ -53,6 +53,7 @@ COPY --from=builder /root/.TinyTeX /root/.TinyTeX
 COPY --from=builder /usr/local/lib/python3.11/dist-packages \
                     /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/lib/R/library /usr/lib/R/library
+COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 
 COPY app /app/app
 COPY docker /app/docker
