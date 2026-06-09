@@ -12,3 +12,5 @@ itsdangerous
 jinja2
 psutil
 cryptography
+# Jupyter for quarto Python chunk execution
+jupyter

@@ -1,0 +1,10 @@
+---
+title: "Minimal Test"
+format: html
+---
+
+# Hello World
+
+This is a minimal Quarto document used for render testing.
+
+A simple equation: $E = mc^2$
