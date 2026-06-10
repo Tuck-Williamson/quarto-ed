@@ -10,7 +10,7 @@
       --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
       --border: #30363d; --text: #c9d1d9; --text2: #8b949e;
       --accent: #58a6ff; --green: #3fb950; --red: #f85149;
-      --yellow: #e3b341;
+      --yellow: #e3b341; --purple: #a371f7;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
            background: var(--bg); color: var(--text);
@@ -23,7 +23,8 @@
       background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
     .topbar .logo { font-weight: 700; font-size: 0.9rem; color: #f0f6fc; }
-    .topbar .repo-label { font-size: 0.78rem; color: var(--text2); }
+    .topbar .repo-label { font-size: 0.78rem; color: var(--text2); text-decoration: none; }
+    .topbar a.repo-label:hover { color: var(--accent); text-decoration: underline; }
     .topbar .spacer { flex: 1; }
     .btn {
       font-size: 0.75rem; font-weight: 600; padding: 0.25rem 0.65rem;
@@ -38,6 +39,42 @@
     .btn-red:hover { background: #8a2222; }
     .btn-ghost { background: transparent; border-color: transparent; }
     .btn-ghost:hover { background: var(--bg3); }
+    .btn-ghost.btn-red { color: var(--red); }
+    .btn-ghost.btn-red:hover { background: #8a2222; color: #fff; }
+
+    /* ── Top bar menu ── */
+    .menu { position: relative; }
+    .dropdown {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+      min-width: 170px; z-index: 50; padding: 0.25rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      max-height: calc(100vh - 56px); overflow-y: auto;
+    }
+    .dropdown.open { display: block; }
+    .dropdown.wide { min-width: 280px; }
+    .dropdown-label {
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+      color: var(--text2); padding: 0.3rem 0.6rem; letter-spacing: 0.05em;
+    }
+    .dropdown-sublabel {
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+      color: var(--text2); padding: 0.3rem 0.6rem 0.1rem; letter-spacing: 0.04em;
+    }
+    .dropdown-divider { border-top: 1px solid var(--border); margin: 0.3rem 0; }
+    .dropdown-item {
+      display: flex; align-items: center; gap: 0.5rem; width: 100%;
+      background: none; border: none; color: var(--text); font-size: 0.8rem;
+      padding: 0.35rem 0.6rem; border-radius: 4px; cursor: pointer; text-align: left;
+      text-decoration: none;
+    }
+    .dropdown-item:hover { background: var(--bg3); }
+    .dropdown-item .shortcut {
+      margin-left: auto; padding-left: 1rem; color: var(--text2);
+      font-size: 0.7rem; white-space: nowrap;
+    }
+    .dropdown-check { width: 1em; flex-shrink: 0; opacity: 0; }
+    .dropdown-check.visible { opacity: 1; }
 
     /* ── Three-pane layout ── */
     .layout { display: flex; flex: 1; overflow: hidden; }
@@ -51,6 +88,7 @@
       content: ''; position: absolute; inset: 0 -4px; /* wider hit area */
     }
     .resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+    .resize-handle.hidden { display: none; }
 
     /* ── Left sidebar (file browser) ── */
     .sidebar {
@@ -58,7 +96,7 @@
       background: var(--bg2); border-right: none;
       display: flex; flex-direction: column; overflow: hidden;
     }
-    .sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; }
+    .sidebar.collapsed { width: 0 !important; min-width: 0 !important; overflow: hidden; }
     .sidebar-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
@@ -72,6 +110,7 @@
     .tree-item.active { background: rgba(88,166,255,0.15); color: var(--accent); }
     .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; }
     .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-item .ignored { text-decoration: underline wavy var(--purple) 1pt; text-underline-offset: 3px; color: var(--purple); }
     .tree-dir > .tree-children { padding-left: 1rem; }
     .tree-children.hidden { display: none; }
     .sidebar-footer { padding: 0.4rem 0.5rem; border-top: 1px solid var(--border);
@@ -101,7 +140,7 @@
     .tab:hover .close-btn { opacity: 1; }
     .tab .close-btn:hover { color: var(--red); }
     #cm-host { flex: 1; overflow: hidden; }
-    #cm-host .cm-editor { height: 100%; }
+    #cm-host .cm-editor { height: 100%; flex: 1; min-width: 0; }
     #cm-host .cm-scroller { overflow: auto; }
     .no-file-msg {
       flex: 1; display: flex; align-items: center; justify-content: center;
@@ -114,7 +153,7 @@
       background: var(--bg2); border-left: none;
       display: flex; flex-direction: column; overflow: hidden;
     }
-    .right-panel.collapsed { width: 0; min-width: 0; overflow: hidden; }
+    .right-panel.collapsed { width: 0 !important; min-width: 0 !important; overflow: hidden; }
     .panel-tabs {
       display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
@@ -234,6 +273,17 @@
     dialog datalist option { background: var(--bg2); }
     dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
 
+    /* Quickhelp dialog */
+    #quickHelpDialog { width: 480px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    #quickHelpDialog h4 {
+      margin: 0.75rem 0 0.25rem; font-size: 0.7rem; color: var(--text2);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    #quickHelpDialog table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 0.5rem; }
+    #quickHelpDialog td { padding: 0.25rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    #quickHelpDialog td.key { white-space: nowrap; font-family: monospace; color: var(--accent); }
+    #quickHelpDialog td.desc { color: var(--text2); }
+
     /* Toggle switch */
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; }
@@ -268,16 +318,37 @@
 
 <!-- Top bar -->
 <div class="topbar">
+  <div class="menu" id="viewMenuWrapper">
+    <button class="btn btn-ghost" onclick="toggleViewMenu(event)" title="View menu">☰</button>
+    <div class="dropdown wide" id="viewMenu">
+      <div class="dropdown-label">View</div>
+      <button class="dropdown-item" onclick="toggleSidebar()">
+        <span class="dropdown-check" id="check-sidebar">✓</span><span>File browser</span>
+      </button>
+      <button class="dropdown-item" onclick="toggleRightPanel()">
+        <span class="dropdown-check" id="check-rightpanel">✓</span><span>Right panel</span>
+      </button>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-label">Edit</div>
+      <div id="editMenuItems"></div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-label">Help</div>
+      <button class="dropdown-item" onclick="openQuickHelp()">
+        <span>Quickhelp</span>
+      </button>
+      <a class="dropdown-item" href="https://codemirror.net/docs/ref/#commands.standardKeymap" target="_blank" rel="noopener noreferrer">
+        <span>Documentation</span>
+      </a>
+    </div>
+  </div>
   <span class="logo">quarto-ed</span>
-  <button class="btn btn-ghost" onclick="toggleSidebar()" title="Toggle file browser">☰</button>
   {% if has_workspace %}
-  <span class="repo-label">{{ repo_owner }}/{{ repo_name }}</span>
+  <a class="repo-label" href="https://github.com/{{ repo_owner }}/{{ repo_name }}" target="_blank" rel="noopener noreferrer">{{ repo_owner }}/{{ repo_name }}</a>
   {% endif %}
   <div class="spacer"></div>
   <span id="save-indicator" style="font-size:0.72rem;color:var(--green);opacity:0;transition:opacity 0.5s">Saved</span>
   <button class="btn btn-green" onclick="document.getElementById('syncDialog').showModal()">↑ Sync</button>
   <button class="btn" onclick="document.getElementById('loadDialog').showModal()">⊞ Load repo</button>
-  <button class="btn btn-ghost" onclick="toggleRightPanel()">◧</button>
   <span style="font-size:0.78rem;color:var(--text2)">{{ username }}</span>
   <button class="btn btn-red btn-ghost" onclick="logout()">Sign out</button>
 </div>
@@ -333,9 +404,10 @@
       <!-- Preview -->
       <div class="panel-pane active" id="panel-preview">
         <div class="preview-toolbar">
-          <button class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
+          <button id="preview-start-btn" class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
           <button class="btn btn-ghost" onclick="reloadPreview()" style="font-size:0.72rem" title="Reload">↺</button>
           <span class="preview-note">Auto-reloads on save</span>
+          <span class="preview-note" style="margin-left:auto">Quarto {{ quarto_version }}</span>
         </div>
         <iframe id="preview-frame" src="about:blank" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
       </div>
@@ -405,8 +477,8 @@
               <label class="toggle"><input type="checkbox" id="s-autoSave" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
             </div>
             <div class="settings-row">
-              <span class="settings-label">Auto-save delay (ms)</span>
-              <input type="number" id="s-autoSaveDelay" min="500" max="10000" step="500" value="2000" onchange="onSettingChange()">
+              <span class="settings-label">Auto-save delay (minutes)</span>
+              <input type="number" id="s-autoSaveDelay" min="0.5" max="10" step="0.5" value="2" onchange="onSettingChange()">
             </div>
             <div class="settings-row">
               <span class="settings-label">Vim keybindings</span>
@@ -479,6 +551,34 @@
   </div>
 </dialog>
 
+<dialog id="conflictDialog">
+  <h3>Local changes conflict with remote</h3>
+  <p>Your workspace has local changes that would be overwritten by the latest version from GitHub.</p>
+  <div id="conflictFileList" style="max-height:160px;overflow-y:auto;margin:0.5rem 0;font-size:0.78rem;color:var(--text2);font-family:monospace;white-space:pre;"></div>
+  <p style="color:var(--red);font-size:0.8rem;margin-top:0.5rem;">&#9888; Discarding local changes is permanent and cannot be undone.</p>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('conflictDialog').close()">Cancel</button>
+    <button class="btn btn-green" onclick="downloadAndDiscard()">Download zip &amp; Discard</button>
+    <button class="btn btn-red" onclick="discardLocal()">Discard local changes</button>
+  </div>
+</dialog>
+
+<!-- Quickhelp dialog -->
+<dialog id="quickHelpDialog">
+  <h3>Editor keybindings</h3>
+  <div id="quickHelpContent"></div>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('quickHelpDialog').close()">Close</button>
+  </div>
+</dialog>
+
+<!-- File tree context menu -->
+<div class="dropdown" id="fileContextMenu" style="position:fixed">
+  <button class="dropdown-item" onclick="addContextTargetToGitignore()">Add to .gitignore</button>
+  <div class="dropdown-divider"></div>
+  <button class="dropdown-item" style="color:var(--red)" onclick="deleteContextTarget()">Delete</button>
+</div>
+
 <script>
 window._tpl = {
   username: {{ username | tojson }},
@@ -497,7 +597,13 @@ import { EditorView as EV } from "https://esm.sh/@codemirror/view@6";
 import { autocompletion, snippetCompletion, startCompletion,
          completionKeymap } from "https://esm.sh/@codemirror/autocomplete@6";
 import { keymap } from "https://esm.sh/@codemirror/view@6";
-import { indentWithTab } from "https://esm.sh/@codemirror/commands@6";
+import { indentWithTab, undo, redo, toggleComment, toggleBlockComment,
+         indentMore, indentLess, moveLineUp, moveLineDown, copyLineDown,
+         deleteLine, selectParentSyntax } from "https://esm.sh/@codemirror/commands@6";
+import { openSearchPanel, findNext, findPrevious, gotoLine,
+         selectNextOccurrence, selectSelectionMatches } from "https://esm.sh/@codemirror/search@6";
+import { foldCode, unfoldCode, foldAll, unfoldAll } from "https://esm.sh/@codemirror/language@6";
+import { openLintPanel, nextDiagnostic } from "https://esm.sh/@codemirror/lint@6";
 import AnsiUp from "https://esm.sh/ansi_up@5";
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -506,7 +612,7 @@ let currentFile = null;
 const openTabs = new Map(); // path → {content, dirty, state}
 let settings = {
   theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
-  autoSave: true, autoSaveDelay: 2000, vimMode: false, commitMessage: "User saved."
+  autoSave: true, autoSaveDelay: 120000, vimMode: false, commitMessage: "User saved."
 };
 let userSnippets = [];
 let settingsSaveTimer = null;
@@ -671,8 +777,8 @@ function renderTree(nodes, container) {
       const wrapper = document.createElement("div");
       wrapper.className = "tree-dir";
       const header = document.createElement("div");
-      header.className = "tree-item";
-      header.innerHTML = `<span class="icon">▸</span><span class="name">${node.name}/</span>`;
+      header.className = "tree-item" + (node.ignored ? " ignored" : "");
+      header.innerHTML = `<span class="icon">▸</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}/</span>`;
       const children = document.createElement("div");
       children.className = "tree-children hidden";
       renderTree(node.children || [], children);
@@ -680,18 +786,91 @@ function renderTree(nodes, container) {
         const collapsed = children.classList.toggle("hidden");
         header.querySelector(".icon").textContent = collapsed ? "▸" : "▾";
       });
+      header.addEventListener("contextmenu", (e) => showFileContextMenu(e, node));
       wrapper.appendChild(header);
       wrapper.appendChild(children);
       container.appendChild(wrapper);
     } else {
       const item = document.createElement("div");
-      item.className = "tree-item" + (node.path === currentFile ? " active" : "");
-      item.innerHTML = `<span class="icon">📄</span><span class="name">${node.name}</span>`;
+      item.className = "tree-item" + (node.path === currentFile ? " active" : "") + (node.ignored ? " ignored" : "");
+      item.innerHTML = `<span class="icon">📄</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}</span>`;
       item.addEventListener("click", () => openFile(node.path));
+      item.addEventListener("contextmenu", (e) => showFileContextMenu(e, node));
       container.appendChild(item);
     }
   }
 }
+
+// ── File tree context menu ──────────────────────────────────────────────────
+let _contextTarget = null;
+
+function showFileContextMenu(e, node) {
+  e.preventDefault();
+  e.stopPropagation();
+  _contextTarget = node;
+  const menu = document.getElementById("fileContextMenu");
+  menu.style.left = e.clientX + "px";
+  menu.style.top = e.clientY + "px";
+  menu.classList.add("open");
+}
+
+function hideFileContextMenu() {
+  document.getElementById("fileContextMenu").classList.remove("open");
+  _contextTarget = null;
+}
+
+document.addEventListener("click", () => hideFileContextMenu());
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest(".tree-item")) hideFileContextMenu();
+});
+
+window.addContextTargetToGitignore = async () => {
+  const node = _contextTarget;
+  hideFileContextMenu();
+  if (!node) return;
+  const res = await fetch("/api/workspace/gitignore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: node.path, is_dir: node.type === "dir" }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert("Failed to update .gitignore: " + (d.detail || res.statusText));
+    return;
+  }
+  const data = await res.json();
+  if (data.untracked) {
+    alert(`"${node.path}" was already tracked by git and has been removed from version control. It will be deleted from the GitHub repo on your next sync.`);
+  }
+  await loadFileTree();
+};
+
+window.deleteContextTarget = async () => {
+  const node = _contextTarget;
+  hideFileContextMenu();
+  if (!node) return;
+  const isDir = node.type === "dir";
+  if (!confirm(`Delete ${isDir ? "folder" : "file"} "${node.path}"? This removes it from the working tree and stages the deletion in git.`)) {
+    return;
+  }
+  const res = await fetch("/api/workspace/file/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: node.path, is_dir: isDir }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert("Failed to delete: " + (d.detail || res.statusText));
+    return;
+  }
+  const prefix = node.path + "/";
+  for (const path of [...openTabs.keys()]) {
+    if (path === node.path || (isDir && path.startsWith(prefix))) {
+      closeTab(path);
+    }
+  }
+  await loadFileTree();
+};
 
 async function openFile(path) {
   if (openTabs.has(path)) { switchToFile(path); return; }
@@ -735,8 +914,141 @@ function scheduleAutoSave() {
 }
 
 // ── Sidebar / panels ───────────────────────────────────────────────────────
-window.toggleSidebar = () => document.getElementById("sidebar").classList.toggle("collapsed");
-window.toggleRightPanel = () => document.getElementById("right-panel").classList.toggle("collapsed");
+window.toggleSidebar = () => {
+  document.getElementById("sidebar").classList.toggle("collapsed");
+  document.getElementById("resize-left").classList.toggle("hidden");
+  updateViewMenuChecks();
+};
+window.toggleRightPanel = () => {
+  document.getElementById("right-panel").classList.toggle("collapsed");
+  document.getElementById("resize-right").classList.toggle("hidden");
+  updateViewMenuChecks();
+};
+
+function updateViewMenuChecks() {
+  document.getElementById("check-sidebar").classList.toggle(
+    "visible", !document.getElementById("sidebar").classList.contains("collapsed"));
+  document.getElementById("check-rightpanel").classList.toggle(
+    "visible", !document.getElementById("right-panel").classList.contains("collapsed"));
+}
+
+// ── Edit menu / editor commands ───────────────────────────────────────────
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+function fmtKey(spec) {
+  const raw = (isMac && spec.mac) ? spec.mac : spec.key;
+  const parts = raw.split("-");
+  const last = parts.pop();
+  const arrows = { ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" };
+  const lastDisplay = arrows[last] || (/^[a-z]$/.test(last) ? last.toUpperCase() : last);
+  const modMap = isMac
+    ? { Mod: "⌘", Cmd: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" }
+    : { Mod: "Ctrl", Cmd: "Ctrl", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift" };
+  const mods = parts.map(p => modMap[p] || p);
+  return isMac ? mods.join("") + lastDisplay : mods.concat(lastDisplay).join("+");
+}
+
+const EDIT_COMMAND_GROUPS = [
+  { label: "History", items: [
+    { label: "Undo", desc: "Undo the last change", cmd: undo, key: "Mod-z" },
+    { label: "Redo", desc: "Redo the last undone change", cmd: redo, key: "Mod-y", mac: "Mod-Shift-z" },
+  ]},
+  { label: "Find & search", items: [
+    { label: "Find / Replace", desc: "Open the search and replace panel", cmd: openSearchPanel, key: "Mod-f" },
+    { label: "Find next", desc: "Jump to the next search match", cmd: findNext, key: "Mod-g" },
+    { label: "Find previous", desc: "Jump to the previous search match", cmd: findPrevious, key: "Shift-Mod-g" },
+    { label: "Go to line", desc: "Jump to a specific line number", cmd: gotoLine, key: "Mod-Alt-g" },
+  ]},
+  { label: "Selection", items: [
+    { label: "Select next occurrence", desc: "Add the next match of the current selection to it", cmd: selectNextOccurrence, key: "Mod-d" },
+    { label: "Select all occurrences", desc: "Select every instance of the current selection", cmd: selectSelectionMatches, key: "Mod-Shift-l" },
+    { label: "Expand selection", desc: "Expand the selection to the enclosing syntax node", cmd: selectParentSyntax, key: "Mod-i" },
+  ]},
+  { label: "Editing", items: [
+    { label: "Toggle comment", desc: "Comment or uncomment the selected lines", cmd: toggleComment, key: "Mod-/" },
+    { label: "Toggle block comment", desc: "Wrap or unwrap the selection in a block comment", cmd: toggleBlockComment, key: "Shift-Alt-a" },
+    { label: "Indent more", desc: "Increase the indentation of the selected lines", cmd: indentMore, key: "Mod-]" },
+    { label: "Indent less", desc: "Decrease the indentation of the selected lines", cmd: indentLess, key: "Mod-[" },
+    { label: "Move line up", desc: "Move the current line(s) up", cmd: moveLineUp, key: "Alt-ArrowUp" },
+    { label: "Move line down", desc: "Move the current line(s) down", cmd: moveLineDown, key: "Alt-ArrowDown" },
+    { label: "Duplicate line", desc: "Copy the current line(s) below", cmd: copyLineDown, key: "Shift-Alt-ArrowDown" },
+    { label: "Delete line", desc: "Delete the current line(s)", cmd: deleteLine, key: "Shift-Mod-k" },
+  ]},
+  { label: "Code folding", items: [
+    { label: "Fold code", desc: "Fold the code block at the cursor", cmd: foldCode, key: "Ctrl-Shift-[", mac: "Cmd-Alt-[" },
+    { label: "Unfold code", desc: "Unfold the code block at the cursor", cmd: unfoldCode, key: "Ctrl-Shift-]", mac: "Cmd-Alt-]" },
+    { label: "Fold all", desc: "Fold all foldable regions", cmd: foldAll, key: "Ctrl-Alt-[" },
+    { label: "Unfold all", desc: "Unfold all folded regions", cmd: unfoldAll, key: "Ctrl-Alt-]" },
+  ]},
+  { label: "Linting", items: [
+    { label: "Open lint panel", desc: "Show the panel listing diagnostics", cmd: openLintPanel, key: "Mod-Shift-m" },
+    { label: "Next diagnostic", desc: "Jump to the next lint diagnostic", cmd: nextDiagnostic, key: "F8" },
+  ]},
+];
+
+const _editCommandMap = {};
+
+function renderEditMenu() {
+  const container = document.getElementById("editMenuItems");
+  let idx = 0;
+  EDIT_COMMAND_GROUPS.forEach((group, gi) => {
+    if (gi > 0) {
+      const div = document.createElement("div");
+      div.className = "dropdown-divider";
+      container.appendChild(div);
+    }
+    const label = document.createElement("div");
+    label.className = "dropdown-sublabel";
+    label.textContent = group.label;
+    container.appendChild(label);
+    group.items.forEach(item => {
+      const id = "ec" + (idx++);
+      _editCommandMap[id] = item.cmd;
+      const btn = document.createElement("button");
+      btn.className = "dropdown-item";
+      btn.innerHTML = `<span>${item.label}</span><span class="shortcut">${fmtKey(item)}</span>`;
+      btn.addEventListener("click", () => runEditorCommand(id));
+      container.appendChild(btn);
+    });
+  });
+}
+
+window.runEditorCommand = (id) => {
+  document.getElementById("viewMenu").classList.remove("open");
+  if (!cmView) return;
+  const cmd = _editCommandMap[id];
+  if (cmd) cmd(cmView);
+  cmView.focus();
+};
+
+window.openQuickHelp = () => {
+  document.getElementById("viewMenu").classList.remove("open");
+  const content = document.getElementById("quickHelpContent");
+  if (!content.dataset.rendered) {
+    let html = "";
+    EDIT_COMMAND_GROUPS.forEach(group => {
+      html += `<h4>${group.label}</h4><table>`;
+      group.items.forEach(item => {
+        html += `<tr><td class="key">${fmtKey(item)}</td><td>${item.label}</td><td class="desc">${item.desc}</td></tr>`;
+      });
+      html += `</table>`;
+    });
+    content.innerHTML = html;
+    content.dataset.rendered = "1";
+  }
+  document.getElementById("quickHelpDialog").showModal();
+};
+
+window.toggleViewMenu = (e) => {
+  e.stopPropagation();
+  document.getElementById("viewMenu").classList.toggle("open");
+};
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("viewMenu");
+  if (menu.classList.contains("open") && !e.target.closest("#viewMenuWrapper")) {
+    menu.classList.remove("open");
+  }
+});
 
 window.switchPanel = (name) => {
   document.querySelectorAll(".panel-tab").forEach(b => b.classList.remove("active"));
@@ -756,10 +1068,23 @@ let _previewActive = false;
 window.loadPreview = () => {
   _previewActive = true;
   document.getElementById("preview-frame").src = "/api/preview/";
+  const btn = document.getElementById("preview-start-btn");
+  btn.textContent = "↻ Re-start preview";
+  btn.onclick = restartPreview;
 };
 window.reloadPreview = () => {
   const f = document.getElementById("preview-frame");
   f.src = f.src;
+};
+window.restartPreview = async () => {
+  const btn = document.getElementById("preview-start-btn");
+  btn.disabled = true;
+  try {
+    await fetch("/api/preview/restart", { method: "POST" });
+    document.getElementById("preview-frame").src = "/api/preview/";
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // Guard: if quarto's live-reload navigates the iframe outside /api/preview/,
@@ -777,6 +1102,25 @@ document.getElementById("preview-frame").addEventListener("load", function () {
     }
   } catch (_) {
     // Cross-origin frame — can't inspect, leave it alone
+  }
+});
+
+// Quarto's live-reload navigates the preview iframe whenever a file is
+// saved (including autosaves), and that navigation steals focus from
+// whatever the user was working in (typically the editor). Track the last
+// focused element outside the iframe and restore focus to it once the
+// reload completes.
+let lastFocusedElement = null;
+document.addEventListener("focusin", (e) => {
+  if (e.target !== document.getElementById("preview-frame")) {
+    lastFocusedElement = e.target;
+  }
+});
+document.getElementById("preview-frame").addEventListener("load", () => {
+  const frame = document.getElementById("preview-frame");
+  if (document.activeElement === frame && lastFocusedElement) {
+    const toFocus = lastFocusedElement;
+    setTimeout(() => { if (document.contains(toFocus)) toFocus.focus(); }, 0);
   }
 });
 
@@ -803,9 +1147,44 @@ window.loadWorkspace = async () => {
   if (res.ok) {
     document.getElementById("loadDialog").close();
     location.reload();
+  } else if (res.status === 409) {
+    const d = await res.json().catch(() => ({}));
+    const files = (d.detail && d.detail.files) || [];
+    document.getElementById("conflictFileList").textContent =
+      files.length ? files.join("\n") : "(no file list available)";
+    document.getElementById("loadDialog").close();
+    document.getElementById("conflictDialog").showModal();
   } else {
     const d = await res.json().catch(() => ({}));
     alert("Load failed: " + (d.detail || res.statusText));
+  }
+};
+
+window.downloadAndDiscard = async () => {
+  const a = document.createElement("a");
+  a.href = "/api/workspace/changes.zip";
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => discardLocal(), 500);
+};
+
+window.discardLocal = async () => {
+  document.getElementById("conflictDialog").close();
+  const res = await fetch("/api/workspace/discard", { method: "POST" });
+  if (!res.ok) { alert("Failed to discard local changes."); return; }
+  const owner = document.getElementById("repoOwner").value.trim();
+  const name  = document.getElementById("repoName").value.trim();
+  const res2 = await fetch("/api/workspace/load", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo_owner: owner, repo_name: name }),
+  });
+  if (res2.ok) { location.reload(); }
+  else {
+    const d = await res2.json().catch(() => ({}));
+    alert("Load failed after discard: " + (d.detail || res2.statusText));
   }
 };
 
@@ -917,7 +1296,7 @@ function applySettings() {
   document.getElementById("s-tabSize").value = String(settings.tabSize);
   document.getElementById("s-wordWrap").checked = settings.wordWrap;
   document.getElementById("s-autoSave").checked = settings.autoSave;
-  document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay;
+  document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay / 60000;
   document.getElementById("s-vimMode").checked = settings.vimMode;
   document.getElementById("s-commitMessage").value = settings.commitMessage ?? "User saved.";
 
@@ -934,7 +1313,7 @@ window.onSettingChange = () => {
     tabSize: parseInt(document.getElementById("s-tabSize").value),
     wordWrap: document.getElementById("s-wordWrap").checked,
     autoSave: document.getElementById("s-autoSave").checked,
-    autoSaveDelay: parseInt(document.getElementById("s-autoSaveDelay").value),
+    autoSaveDelay: Math.round(parseFloat(document.getElementById("s-autoSaveDelay").value) * 60000),
     vimMode: document.getElementById("s-vimMode").checked,
     commitMessage: document.getElementById("s-commitMessage").value || "User saved.",
   };
@@ -1113,6 +1492,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initResize("resize-left", "sidebar", "pane-left", "left");
   initResize("resize-right", "right-panel", "pane-right", "right");
+  updateViewMenuChecks();
+  renderEditMenu();
 
   await loadSettings();
   loadRepos();

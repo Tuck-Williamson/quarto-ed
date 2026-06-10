@@ -1,8 +1,12 @@
 import asyncio
+import io
 import json
 import os
 import re
+import shutil
 import socket
+import subprocess
+import zipfile
 
 import httpx
 import websockets
@@ -18,8 +22,10 @@ from .models import Session, User
 from .schemas import (
     AIChatRequest,
     CommitRequest,
+    DeleteFileRequest,
     FileCreateRequest,
     FileWriteRequest,
+    GitignoreAddRequest,
     SettingsSaveRequest,
     SyncRequest,
     WorkspaceLoadRequest,
@@ -45,6 +51,19 @@ _QUARTO_ENV_ALLOWLIST = frozenset({
 })
 
 _GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _get_quarto_version() -> str:
+    try:
+        result = subprocess.run(
+            ["quarto", "--version"], capture_output=True, text=True, timeout=10
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+_QUARTO_VERSION = _get_quarto_version()
 
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
@@ -292,6 +311,7 @@ async def editor(request: Request):
             "repo_owner": sess.repo_owner or "",
             "repo_name": sess.repo_name or "",
             "ai_enabled": bool(_ANTHROPIC_KEY),
+            "quarto_version": _QUARTO_VERSION,
         },
     )
 
@@ -358,7 +378,19 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise HTTPException(status_code=400, detail=f"git pull failed: {_redact(stderr.decode(), access_token)}")
+            stderr_str = _redact(stderr.decode(), access_token)
+            if "would be overwritten" in stderr_str or "Please commit" in stderr_str:
+                stat = await asyncio.create_subprocess_exec(
+                    "git", "-C", workspace_path, "status", "--porcelain",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                stat_out, _ = await stat.communicate()
+                files = [ln[3:] for ln in stat_out.decode().splitlines() if ln.strip()]
+                raise HTTPException(
+                    status_code=409,
+                    detail={"type": "local_changes", "files": files},
+                )
+            raise HTTPException(status_code=400, detail=f"git pull failed: {stderr_str}")
     else:
         clone_url = (
             f"https://oauth2:{access_token}@github.com/"
@@ -426,6 +458,68 @@ async def sync_workspace(request: Request, body: SyncRequest):
     return {"status": "ok"}
 
 
+@router.get("/api/workspace/changes.zip")
+async def download_local_changes(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", sess.workspace_path, "status", "--porcelain",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    files = [ln[3:].strip() for ln in out.decode().splitlines() if ln.strip()]
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in files:
+            full = os.path.join(sess.workspace_path, rel)
+            if os.path.isfile(full):
+                zf.write(full, rel)
+    buf.seek(0)
+
+    repo = os.path.basename(sess.workspace_path)
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{repo}-local-changes.zip"'},
+    )
+
+
+@router.post("/api/workspace/discard")
+async def discard_local_changes(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+
+    path = sess.workspace_path
+    branch_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    branch_out, _ = await branch_proc.communicate()
+    branch = branch_out.decode().strip() or "main"
+
+    for cmd in [
+        ["git", "-C", path, "fetch", "origin"],
+        ["git", "-C", path, "reset", "--hard", f"origin/{branch}"],
+        ["git", "-C", path, "clean", "-fd"],
+    ]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
+    return {"status": "ok"}
+
+
 # ── File API ──────────────────────────────────────────────────────────────────
 
 def _build_tree(root: str, rel_base: str = "") -> list:
@@ -447,6 +541,21 @@ def _build_tree(root: str, rel_base: str = "") -> list:
     return entries
 
 
+def _collect_paths(nodes: list, out: list) -> None:
+    for node in nodes:
+        out.append(node["path"])
+        if node["type"] == "dir":
+            _collect_paths(node.get("children", []), out)
+
+
+def _mark_ignored(nodes: list, ignored: set) -> None:
+    for node in nodes:
+        if node["path"] in ignored:
+            node["ignored"] = True
+        if node["type"] == "dir":
+            _mark_ignored(node.get("children", []), ignored)
+
+
 @router.get("/api/files")
 async def list_files(request: Request):
     sess = await get_current_session(request)
@@ -454,7 +563,23 @@ async def list_files(request: Request):
         raise HTTPException(status_code=401)
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded")
-    return {"tree": _build_tree(sess.workspace_path)}
+    tree = _build_tree(sess.workspace_path)
+
+    paths = []
+    _collect_paths(tree, paths)
+    if paths:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", sess.workspace_path, "check-ignore", "-z", "--stdin",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        input_data = ("\0".join(paths) + "\0").encode("utf-8")
+        out, _ = await proc.communicate(input_data)
+        ignored = {p for p in out.decode("utf-8").split("\0") if p}
+        _mark_ignored(tree, ignored)
+
+    return {"tree": tree}
 
 
 @router.get("/api/file")
@@ -502,6 +627,85 @@ async def create_file(request: Request, body: FileCreateRequest):
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
     with open(full_path, "w", encoding="utf-8") as f:
         f.write("")
+    return {"status": "ok"}
+
+
+@router.post("/api/workspace/gitignore")
+async def add_to_gitignore(request: Request, body: GitignoreAddRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    _safe_path(sess.workspace_path, body.path)  # validate, raises on traversal
+
+    rel = body.path.strip("/")
+    entry = f"/{rel}" + ("/" if body.is_dir else "")
+
+    gitignore_path = os.path.join(sess.workspace_path, ".gitignore")
+    content = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, encoding="utf-8") as f:
+            content = f.read()
+
+    added = entry not in content.splitlines()
+    if added:
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += entry + "\n"
+        with open(gitignore_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    # If the path was already committed, untrack it so .gitignore takes effect.
+    ls_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", sess.workspace_path, "ls-files", "-z", "--", rel,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await ls_proc.communicate()
+    untracked = False
+    if out.strip(b"\x00"):
+        rm_cmd = ["git", "-C", sess.workspace_path, "rm", "--cached", "-q"]
+        if body.is_dir:
+            rm_cmd.append("-r")
+        rm_cmd += ["--", rel]
+        rm_proc = await asyncio.create_subprocess_exec(
+            *rm_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await rm_proc.wait()
+        untracked = rm_proc.returncode == 0
+
+    return {"status": "ok", "added": added, "untracked": untracked}
+
+
+@router.post("/api/workspace/file/delete")
+async def delete_file(request: Request, body: DeleteFileRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, body.path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    rel = body.path.strip("/")
+
+    rm_cmd = ["git", "-C", sess.workspace_path, "rm", "-q", "-f"]
+    if body.is_dir:
+        rm_cmd.append("-r")
+    rm_cmd += ["--", rel]
+    rm_proc = await asyncio.create_subprocess_exec(
+        *rm_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await rm_proc.wait()
+
+    # git rm fails for untracked files; fall back to plain filesystem removal.
+    if os.path.exists(full_path):
+        if body.is_dir:
+            shutil.rmtree(full_path)
+        else:
+            os.remove(full_path)
+
     return {"status": "ok"}
 
 
@@ -682,9 +886,21 @@ async def get_preview_logs(request: Request):
     return {"lines": _preview_logs.get(sess.user_id, []), "running": running}
 
 
+@router.post("/api/preview/restart")
+async def restart_preview(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
+    await kill_quarto_preview(sess.user_id)
+    port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id)
+    return {"status": "ok", "port": port}
+
+
 # ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
 
-_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding", "accept-encoding"}
 _STRIP_RESP_HEADERS = {"host", "connection", "transfer-encoding", "content-encoding", "content-length"}
 
 
