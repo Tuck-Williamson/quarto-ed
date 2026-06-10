@@ -49,18 +49,30 @@
       background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
       min-width: 170px; z-index: 50; padding: 0.25rem;
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      max-height: calc(100vh - 56px); overflow-y: auto;
     }
     .dropdown.open { display: block; }
+    .dropdown.wide { min-width: 280px; }
     .dropdown-label {
       font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
       color: var(--text2); padding: 0.3rem 0.6rem; letter-spacing: 0.05em;
     }
+    .dropdown-sublabel {
+      font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+      color: var(--text2); padding: 0.3rem 0.6rem 0.1rem; letter-spacing: 0.04em;
+    }
+    .dropdown-divider { border-top: 1px solid var(--border); margin: 0.3rem 0; }
     .dropdown-item {
       display: flex; align-items: center; gap: 0.5rem; width: 100%;
       background: none; border: none; color: var(--text); font-size: 0.8rem;
       padding: 0.35rem 0.6rem; border-radius: 4px; cursor: pointer; text-align: left;
+      text-decoration: none;
     }
     .dropdown-item:hover { background: var(--bg3); }
+    .dropdown-item .shortcut {
+      margin-left: auto; padding-left: 1rem; color: var(--text2);
+      font-size: 0.7rem; white-space: nowrap;
+    }
     .dropdown-check { width: 1em; flex-shrink: 0; opacity: 0; }
     .dropdown-check.visible { opacity: 1; }
 
@@ -261,6 +273,17 @@
     dialog datalist option { background: var(--bg2); }
     dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
 
+    /* Quickhelp dialog */
+    #quickHelpDialog { width: 480px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+    #quickHelpDialog h4 {
+      margin: 0.75rem 0 0.25rem; font-size: 0.7rem; color: var(--text2);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    #quickHelpDialog table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 0.5rem; }
+    #quickHelpDialog td { padding: 0.25rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    #quickHelpDialog td.key { white-space: nowrap; font-family: monospace; color: var(--accent); }
+    #quickHelpDialog td.desc { color: var(--text2); }
+
     /* Toggle switch */
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; }
@@ -297,7 +320,7 @@
 <div class="topbar">
   <div class="menu" id="viewMenuWrapper">
     <button class="btn btn-ghost" onclick="toggleViewMenu(event)" title="View menu">☰</button>
-    <div class="dropdown" id="viewMenu">
+    <div class="dropdown wide" id="viewMenu">
       <div class="dropdown-label">View</div>
       <button class="dropdown-item" onclick="toggleSidebar()">
         <span class="dropdown-check" id="check-sidebar">✓</span><span>File browser</span>
@@ -305,6 +328,17 @@
       <button class="dropdown-item" onclick="toggleRightPanel()">
         <span class="dropdown-check" id="check-rightpanel">✓</span><span>Right panel</span>
       </button>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-label">Edit</div>
+      <div id="editMenuItems"></div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-label">Help</div>
+      <button class="dropdown-item" onclick="openQuickHelp()">
+        <span>Quickhelp</span>
+      </button>
+      <a class="dropdown-item" href="https://codemirror.net/docs/ref/#commands.standardKeymap" target="_blank" rel="noopener noreferrer">
+        <span>Documentation</span>
+      </a>
     </div>
   </div>
   <span class="logo">quarto-ed</span>
@@ -529,6 +563,15 @@
   </div>
 </dialog>
 
+<!-- Quickhelp dialog -->
+<dialog id="quickHelpDialog">
+  <h3>Editor keybindings</h3>
+  <div id="quickHelpContent"></div>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('quickHelpDialog').close()">Close</button>
+  </div>
+</dialog>
+
 <!-- File tree context menu -->
 <div class="dropdown" id="fileContextMenu" style="position:fixed">
   <button class="dropdown-item" onclick="addContextTargetToGitignore()">Add to .gitignore</button>
@@ -552,7 +595,13 @@ import { EditorView as EV } from "https://esm.sh/@codemirror/view@6";
 import { autocompletion, snippetCompletion, startCompletion,
          completionKeymap } from "https://esm.sh/@codemirror/autocomplete@6";
 import { keymap } from "https://esm.sh/@codemirror/view@6";
-import { indentWithTab } from "https://esm.sh/@codemirror/commands@6";
+import { indentWithTab, undo, redo, toggleComment, toggleBlockComment,
+         indentMore, indentLess, moveLineUp, moveLineDown, copyLineDown,
+         deleteLine, selectParentSyntax } from "https://esm.sh/@codemirror/commands@6";
+import { openSearchPanel, findNext, findPrevious, gotoLine,
+         selectNextOccurrence, selectSelectionMatches } from "https://esm.sh/@codemirror/search@6";
+import { foldCode, unfoldCode, foldAll, unfoldAll } from "https://esm.sh/@codemirror/language@6";
+import { openLintPanel, nextDiagnostic } from "https://esm.sh/@codemirror/lint@6";
 import AnsiUp from "https://esm.sh/ansi_up@5";
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -853,6 +902,113 @@ function updateViewMenuChecks() {
   document.getElementById("check-rightpanel").classList.toggle(
     "visible", !document.getElementById("right-panel").classList.contains("collapsed"));
 }
+
+// ── Edit menu / editor commands ───────────────────────────────────────────
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+function fmtKey(spec) {
+  const raw = (isMac && spec.mac) ? spec.mac : spec.key;
+  const parts = raw.split("-");
+  const last = parts.pop();
+  const arrows = { ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→" };
+  const lastDisplay = arrows[last] || (/^[a-z]$/.test(last) ? last.toUpperCase() : last);
+  const modMap = isMac
+    ? { Mod: "⌘", Cmd: "⌘", Ctrl: "⌃", Alt: "⌥", Shift: "⇧" }
+    : { Mod: "Ctrl", Cmd: "Ctrl", Ctrl: "Ctrl", Alt: "Alt", Shift: "Shift" };
+  const mods = parts.map(p => modMap[p] || p);
+  return isMac ? mods.join("") + lastDisplay : mods.concat(lastDisplay).join("+");
+}
+
+const EDIT_COMMAND_GROUPS = [
+  { label: "History", items: [
+    { label: "Undo", desc: "Undo the last change", cmd: undo, key: "Mod-z" },
+    { label: "Redo", desc: "Redo the last undone change", cmd: redo, key: "Mod-y", mac: "Mod-Shift-z" },
+  ]},
+  { label: "Find & search", items: [
+    { label: "Find / Replace", desc: "Open the search and replace panel", cmd: openSearchPanel, key: "Mod-f" },
+    { label: "Find next", desc: "Jump to the next search match", cmd: findNext, key: "Mod-g" },
+    { label: "Find previous", desc: "Jump to the previous search match", cmd: findPrevious, key: "Shift-Mod-g" },
+    { label: "Go to line", desc: "Jump to a specific line number", cmd: gotoLine, key: "Mod-Alt-g" },
+  ]},
+  { label: "Selection", items: [
+    { label: "Select next occurrence", desc: "Add the next match of the current selection to it", cmd: selectNextOccurrence, key: "Mod-d" },
+    { label: "Select all occurrences", desc: "Select every instance of the current selection", cmd: selectSelectionMatches, key: "Mod-Shift-l" },
+    { label: "Expand selection", desc: "Expand the selection to the enclosing syntax node", cmd: selectParentSyntax, key: "Mod-i" },
+  ]},
+  { label: "Editing", items: [
+    { label: "Toggle comment", desc: "Comment or uncomment the selected lines", cmd: toggleComment, key: "Mod-/" },
+    { label: "Toggle block comment", desc: "Wrap or unwrap the selection in a block comment", cmd: toggleBlockComment, key: "Shift-Alt-a" },
+    { label: "Indent more", desc: "Increase the indentation of the selected lines", cmd: indentMore, key: "Mod-]" },
+    { label: "Indent less", desc: "Decrease the indentation of the selected lines", cmd: indentLess, key: "Mod-[" },
+    { label: "Move line up", desc: "Move the current line(s) up", cmd: moveLineUp, key: "Alt-ArrowUp" },
+    { label: "Move line down", desc: "Move the current line(s) down", cmd: moveLineDown, key: "Alt-ArrowDown" },
+    { label: "Duplicate line", desc: "Copy the current line(s) below", cmd: copyLineDown, key: "Shift-Alt-ArrowDown" },
+    { label: "Delete line", desc: "Delete the current line(s)", cmd: deleteLine, key: "Shift-Mod-k" },
+  ]},
+  { label: "Code folding", items: [
+    { label: "Fold code", desc: "Fold the code block at the cursor", cmd: foldCode, key: "Ctrl-Shift-[", mac: "Cmd-Alt-[" },
+    { label: "Unfold code", desc: "Unfold the code block at the cursor", cmd: unfoldCode, key: "Ctrl-Shift-]", mac: "Cmd-Alt-]" },
+    { label: "Fold all", desc: "Fold all foldable regions", cmd: foldAll, key: "Ctrl-Alt-[" },
+    { label: "Unfold all", desc: "Unfold all folded regions", cmd: unfoldAll, key: "Ctrl-Alt-]" },
+  ]},
+  { label: "Linting", items: [
+    { label: "Open lint panel", desc: "Show the panel listing diagnostics", cmd: openLintPanel, key: "Mod-Shift-m" },
+    { label: "Next diagnostic", desc: "Jump to the next lint diagnostic", cmd: nextDiagnostic, key: "F8" },
+  ]},
+];
+
+const _editCommandMap = {};
+
+function renderEditMenu() {
+  const container = document.getElementById("editMenuItems");
+  let idx = 0;
+  EDIT_COMMAND_GROUPS.forEach((group, gi) => {
+    if (gi > 0) {
+      const div = document.createElement("div");
+      div.className = "dropdown-divider";
+      container.appendChild(div);
+    }
+    const label = document.createElement("div");
+    label.className = "dropdown-sublabel";
+    label.textContent = group.label;
+    container.appendChild(label);
+    group.items.forEach(item => {
+      const id = "ec" + (idx++);
+      _editCommandMap[id] = item.cmd;
+      const btn = document.createElement("button");
+      btn.className = "dropdown-item";
+      btn.innerHTML = `<span>${item.label}</span><span class="shortcut">${fmtKey(item)}</span>`;
+      btn.addEventListener("click", () => runEditorCommand(id));
+      container.appendChild(btn);
+    });
+  });
+}
+
+window.runEditorCommand = (id) => {
+  document.getElementById("viewMenu").classList.remove("open");
+  if (!cmView) return;
+  const cmd = _editCommandMap[id];
+  if (cmd) cmd(cmView);
+  cmView.focus();
+};
+
+window.openQuickHelp = () => {
+  document.getElementById("viewMenu").classList.remove("open");
+  const content = document.getElementById("quickHelpContent");
+  if (!content.dataset.rendered) {
+    let html = "";
+    EDIT_COMMAND_GROUPS.forEach(group => {
+      html += `<h4>${group.label}</h4><table>`;
+      group.items.forEach(item => {
+        html += `<tr><td class="key">${fmtKey(item)}</td><td>${item.label}</td><td class="desc">${item.desc}</td></tr>`;
+      });
+      html += `</table>`;
+    });
+    content.innerHTML = html;
+    content.dataset.rendered = "1";
+  }
+  document.getElementById("quickHelpDialog").showModal();
+};
 
 window.toggleViewMenu = (e) => {
   e.stopPropagation();
@@ -1308,6 +1464,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initResize("resize-left", "sidebar", "pane-left", "left");
   initResize("resize-right", "right-panel", "pane-right", "right");
   updateViewMenuChecks();
+  renderEditMenu();
 
   await loadSettings();
   loadRepos();
