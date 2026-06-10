@@ -102,14 +102,18 @@ def ensure_workspace_owned(base_path: str, user_id: int) -> None:
     if not os.path.exists(marker):
         for root, _dirs, files in os.walk(base_path):
             os.chown(root, -1, gid)
-            os.chmod(root, 0o2770)
+            # setgid on a *directory* only propagates group ownership to new
+            # entries -- it does not grant execute-as-group like setgid on a
+            # file would. Safe per the module-level invariant above.
+            os.chmod(root, 0o2770)  # nosec B103
             for f in files:
                 _regroup_file(os.path.join(root, f), gid)
         with open(marker, "w"):
             pass
 
     os.chown(base_path, 0, gid)
-    os.chmod(base_path, 0o2770)
+    # See note above: setgid on a directory propagates group ownership only.
+    os.chmod(base_path, 0o2770)  # nosec B103
 
 
 def drop_privileges_kwargs(user_id: int) -> dict:
