@@ -23,6 +23,7 @@ from .schemas import (
     CommitRequest,
     FileCreateRequest,
     FileWriteRequest,
+    GitignoreAddRequest,
     SettingsSaveRequest,
     SyncRequest,
     WorkspaceLoadRequest,
@@ -538,6 +539,21 @@ def _build_tree(root: str, rel_base: str = "") -> list:
     return entries
 
 
+def _collect_paths(nodes: list, out: list) -> None:
+    for node in nodes:
+        out.append(node["path"])
+        if node["type"] == "dir":
+            _collect_paths(node.get("children", []), out)
+
+
+def _mark_ignored(nodes: list, ignored: set) -> None:
+    for node in nodes:
+        if node["path"] in ignored:
+            node["ignored"] = True
+        if node["type"] == "dir":
+            _mark_ignored(node.get("children", []), ignored)
+
+
 @router.get("/api/files")
 async def list_files(request: Request):
     sess = await get_current_session(request)
@@ -545,7 +561,23 @@ async def list_files(request: Request):
         raise HTTPException(status_code=401)
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded")
-    return {"tree": _build_tree(sess.workspace_path)}
+    tree = _build_tree(sess.workspace_path)
+
+    paths = []
+    _collect_paths(tree, paths)
+    if paths:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", sess.workspace_path, "check-ignore", "-z", "--stdin",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        input_data = ("\0".join(paths) + "\0").encode("utf-8")
+        out, _ = await proc.communicate(input_data)
+        ignored = {p for p in out.decode("utf-8").split("\0") if p}
+        _mark_ignored(tree, ignored)
+
+    return {"tree": tree}
 
 
 @router.get("/api/file")
@@ -594,6 +626,53 @@ async def create_file(request: Request, body: FileCreateRequest):
     with open(full_path, "w", encoding="utf-8") as f:
         f.write("")
     return {"status": "ok"}
+
+
+@router.post("/api/workspace/gitignore")
+async def add_to_gitignore(request: Request, body: GitignoreAddRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    _safe_path(sess.workspace_path, body.path)  # validate, raises on traversal
+
+    rel = body.path.strip("/")
+    entry = f"/{rel}" + ("/" if body.is_dir else "")
+
+    gitignore_path = os.path.join(sess.workspace_path, ".gitignore")
+    content = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, encoding="utf-8") as f:
+            content = f.read()
+
+    added = entry not in content.splitlines()
+    if added:
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += entry + "\n"
+        with open(gitignore_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    # If the path was already committed, untrack it so .gitignore takes effect.
+    ls_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", sess.workspace_path, "ls-files", "-z", "--", rel,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await ls_proc.communicate()
+    untracked = False
+    if out.strip(b"\x00"):
+        rm_cmd = ["git", "-C", sess.workspace_path, "rm", "--cached", "-q"]
+        if body.is_dir:
+            rm_cmd.append("-r")
+        rm_cmd += ["--", rel]
+        rm_proc = await asyncio.create_subprocess_exec(
+            *rm_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await rm_proc.wait()
+        untracked = rm_proc.returncode == 0
+
+    return {"status": "ok", "added": added, "untracked": untracked}
 
 
 # ── Settings API ──────────────────────────────────────────────────────────────

@@ -19,6 +19,11 @@ class FileCreateRequest(BaseModel):
     path: str
 
 
+class GitignoreAddRequest(BaseModel):
+    path: str
+    is_dir: bool = False
+
+
 class SettingsSaveRequest(BaseModel):
     settings: dict
     snippets: list | None = None
