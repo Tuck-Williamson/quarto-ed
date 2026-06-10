@@ -30,7 +30,7 @@ async def test_get_settings_returns_defaults_when_no_repo(auth_client, monkeypat
     """When clone fails (no GitHub access), defaults are returned."""
     from app import proxy
 
-    async def _mock_ensure_cloned(_username, _token):
+    async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
     monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
@@ -50,7 +50,7 @@ async def test_get_settings_returns_defaults_when_no_repo(auth_client, monkeypat
 async def test_save_settings_returns_no_repo_when_not_cloned(auth_client, monkeypatch):
     from app import proxy
 
-    async def _mock_ensure_cloned(_username, _token):
+    async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
     monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)

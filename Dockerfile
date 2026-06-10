@@ -43,7 +43,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.11 python3-pip git openssh-client ca-certificates \
+        python3.11 python3.11-venv python3-pip git openssh-client ca-certificates \
         supervisor r-base libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,6 +60,18 @@ COPY docker /app/docker
 
 RUN mkdir -p /workspace /var/log/supervisor \
     && chmod +x /app/docker/entrypoint.sh
+
+# Sandbox hardening: `quarto preview` runs as a per-user unprivileged
+# account (qe<user_id>, see app/sandbox.py) that needs read+execute access
+# to the shared runtime (quarto, R, TinyTeX, Python packages) but must not
+# be able to read the application source or other users' home directories.
+# /root is 0700 by default, which would otherwise hide TinyTeX from that
+# account entirely.
+RUN chmod o+x /root \
+    && chmod -R o+rX /root/.TinyTeX /opt/quarto \
+        /usr/local/lib/python3.11/dist-packages \
+        /usr/lib/R/library /usr/local/lib/R/site-library \
+    && chmod -R o-rwx /app
 
 WORKDIR /app
 

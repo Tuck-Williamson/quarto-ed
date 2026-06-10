@@ -10,6 +10,11 @@ from .database import engine, get_db_session
 from .models import Base, Session
 from .proxy import router as proxy_router
 
+# Group-writable by default: /workspace dirs are setgid to a per-user sandbox
+# group (see app/sandbox.py), so files this process creates there must be
+# group-writable for the sandboxed quarto preview process to use them.
+os.umask(0o002)
+
 app = FastAPI(title="quarto-ed")
 
 app.add_middleware(

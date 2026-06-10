@@ -81,3 +81,32 @@ Push to `main` to trigger a build and deploy.
 
 - **Ephemeral filesystem**: workspace files are lost on dyno restart. Use **Sync to GitHub** before closing.
 - **Single worker**: process state (quarto preview port/pid) is in-memory; multiple uvicorn workers not supported.
+
+## Addendum: per-user sandbox accounts on non-ephemeral deployments
+
+`quarto preview` runs as a dedicated, deterministic system account (`qe<user_id>`,
+UID `20000 + user_id`) per authenticated user, with `/workspace/<username>`
+locked down to that account's group (see `app/sandbox.py`). This is created
+lazily on first use and never removed.
+
+On Heroku's standard **ephemeral filesystem**, this is a non-issue — the
+account and workspace directory disappear on every dyno restart along with
+the rest of `/workspace`.
+
+If you run quarto-ed on a host with **persistent storage** (a custom Heroku
+setup with a mounted volume, or any non-Heroku deployment with a durable
+`/workspace`), the `qe<user_id>` account and its workspace directory will
+persist indefinitely, even after a user revokes GitHub access or is removed
+from the `users` table. This is **not** a cross-user security risk — the
+directory remains owned by that user's dedicated group at mode `2770`, so it
+stays inaccessible to other `qe<user_id>` accounts — but it does mean stale
+accounts and disk usage accumulate for users who no longer use the service.
+
+If that matters for your deployment, periodically reconcile against the
+`users` table and, for any `user_id` no longer present:
+
+```bash
+userdel qe<user_id>
+groupdel qe<user_id>   # if not removed automatically
+rm -rf /workspace/<username>
+```

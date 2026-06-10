@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, Streamin
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 
+from . import sandbox
 from .auth import get_current_session
 from .database import decrypt_token, get_db_session
 from .models import Session, User
@@ -107,15 +108,69 @@ async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str =
         pass
 
 
-def _quarto_env(user_id: int) -> dict:
+def _quarto_env(user_id: int, python_bin: str | None = None) -> dict:
     """Build a minimal env dict for the quarto subprocess.
 
     Allowlist-based so new secrets added to the server env are never forwarded
     to user code chunks (e.g. a Python block doing print(os.environ)).
+
+    If `python_bin` is given (the interpreter from a per-repo venv), point
+    QUARTO_PYTHON at it and prepend its bin/ dir to PATH so `!pip install`
+    inside a chunk also targets the venv.
     """
     env = {k: v for k, v in os.environ.items() if k in _QUARTO_ENV_ALLOWLIST}
     env["HOME"] = os.path.join(_WORKSPACE_BASE, str(user_id))
+    if python_bin:
+        env["QUARTO_PYTHON"] = python_bin
+        venv_bin = os.path.dirname(python_bin)
+        env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
     return env
+
+
+def _add_gitignore_entry(workspace_path: str, entry: str) -> None:
+    """Append `entry` to .gitignore if not already present (best-effort)."""
+    gitignore_path = os.path.join(workspace_path, ".gitignore")
+    content = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, encoding="utf-8") as f:
+            content = f.read()
+    if entry in content.splitlines():
+        return
+    if content and not content.endswith("\n"):
+        content += "\n"
+    content += entry + "\n"
+    with open(gitignore_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+async def _ensure_quarto_venv(workspace_path: str, user_id: int, env: dict) -> str:
+    """Create a per-repo Python venv (if missing) so quarto's jupyter engine
+    can `pip install` extra packages without touching the system site-packages.
+
+    Uses --system-site-packages so jupyter/ipykernel from the base image are
+    already importable; pip-installed packages still land in the venv's own
+    site-packages, isolated per repo. Returns the path to the venv's python.
+    """
+    uid, gid = sandbox.ensure_user_account(user_id)
+    venv_path = os.path.join(workspace_path, ".venv")
+    python_bin = os.path.join(venv_path, "bin", "python3")
+
+    if not os.path.exists(python_bin):
+        proc = await asyncio.create_subprocess_exec(
+            "python3", "-m", "venv", "--system-site-packages", venv_path,
+            env=env,
+            user=uid,
+            group=gid,
+            cwd=workspace_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Failed to create quarto venv: {stderr.decode()}")
+
+    _add_gitignore_entry(workspace_path, ".venv/")
+    return python_bin
 
 
 def _redact(text: str, *secrets: str) -> str:
@@ -171,12 +226,25 @@ async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: f
 async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: int) -> int:
     port = _allocate_port()
 
+    uid, gid = sandbox.ensure_user_account(user_id)
+    sandbox.ensure_workspace_owned(os.path.dirname(workspace_path), user_id)
+
+    home_dir = os.path.join(_WORKSPACE_BASE, str(user_id))
+    sandbox.ensure_dir_owned(home_dir, uid, gid, mode=0o700)
+
+    base_env = _quarto_env(user_id)
+    python_bin = await _ensure_quarto_venv(workspace_path, user_id, base_env)
+    env = _quarto_env(user_id, python_bin)
+
     process = await asyncio.create_subprocess_exec(
         "quarto", "preview", workspace_path,
         "--port", str(port),
         "--host", "127.0.0.1",
         "--no-browser",
-        env=_quarto_env(user_id),
+        env=env,
+        user=uid,
+        group=gid,
+        cwd=workspace_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -245,8 +313,9 @@ def _settings_repo_local_path(username: str) -> str:
     return os.path.join(_WORKSPACE_BASE, username, f"{username}-quarto-ed-settings")
 
 
-async def _ensure_settings_cloned(username: str, access_token: str) -> bool:
+async def _ensure_settings_cloned(user_id: int, username: str, access_token: str) -> bool:
     """Clone settings repo if not present locally. Returns True if available."""
+    sandbox.ensure_workspace_owned(os.path.join(_WORKSPACE_BASE, username), user_id)
     local_path = _settings_repo_local_path(username)
     if os.path.isdir(os.path.join(local_path, ".git")):
         return True
@@ -366,6 +435,7 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         user = result.scalar_one_or_none()
 
     access_token = decrypt_token(user.access_token_encrypted)
+    sandbox.ensure_workspace_owned(os.path.join(_WORKSPACE_BASE, user.username), user.id)
     workspace_path = os.path.join(_WORKSPACE_BASE, user.username, body.repo_name)
     os.makedirs(workspace_path, exist_ok=True)
 
@@ -751,7 +821,7 @@ async def create_settings_repo(request: Request):
 
     local_path = _settings_repo_local_path(user.username)
     if not os.path.isdir(os.path.join(local_path, ".git")):
-        cloned = await _ensure_settings_cloned(user.username, token)
+        cloned = await _ensure_settings_cloned(user.id, user.username, token)
         if not cloned:
             raise HTTPException(status_code=502, detail="Failed to clone settings repo")
 
@@ -785,7 +855,7 @@ async def get_settings(request: Request):
     local_path = _settings_repo_local_path(user.username)
 
     if not os.path.isdir(os.path.join(local_path, ".git")):
-        cloned = await _ensure_settings_cloned(user.username, token)
+        cloned = await _ensure_settings_cloned(user.id, user.username, token)
         if not cloned:
             return {"settings": _SETTINGS_DEFAULTS, "snippets": [], "repo_exists": False}
 
@@ -818,7 +888,7 @@ async def save_settings(request: Request, body: SettingsSaveRequest):
     local_path = _settings_repo_local_path(user.username)
 
     if not os.path.isdir(os.path.join(local_path, ".git")):
-        cloned = await _ensure_settings_cloned(user.username, token)
+        cloned = await _ensure_settings_cloned(user.id, user.username, token)
         if not cloned:
             return {"status": "no_repo"}
 
