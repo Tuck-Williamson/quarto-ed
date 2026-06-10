@@ -443,8 +443,8 @@
               <label class="toggle"><input type="checkbox" id="s-autoSave" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
             </div>
             <div class="settings-row">
-              <span class="settings-label">Auto-save delay (ms)</span>
-              <input type="number" id="s-autoSaveDelay" min="500" max="10000" step="500" value="2000" onchange="onSettingChange()">
+              <span class="settings-label">Auto-save delay (minutes)</span>
+              <input type="number" id="s-autoSaveDelay" min="0.5" max="10" step="0.5" value="2" onchange="onSettingChange()">
             </div>
             <div class="settings-row">
               <span class="settings-label">Vim keybindings</span>
@@ -561,7 +561,7 @@ let currentFile = null;
 const openTabs = new Map(); // path → {content, dirty, state}
 let settings = {
   theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
-  autoSave: true, autoSaveDelay: 2000, vimMode: false, commitMessage: "User saved."
+  autoSave: true, autoSaveDelay: 120000, vimMode: false, commitMessage: "User saved."
 };
 let userSnippets = [];
 let settingsSaveTimer = null;
@@ -1111,7 +1111,7 @@ function applySettings() {
   document.getElementById("s-tabSize").value = String(settings.tabSize);
   document.getElementById("s-wordWrap").checked = settings.wordWrap;
   document.getElementById("s-autoSave").checked = settings.autoSave;
-  document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay;
+  document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay / 60000;
   document.getElementById("s-vimMode").checked = settings.vimMode;
   document.getElementById("s-commitMessage").value = settings.commitMessage ?? "User saved.";
 
@@ -1128,7 +1128,7 @@ window.onSettingChange = () => {
     tabSize: parseInt(document.getElementById("s-tabSize").value),
     wordWrap: document.getElementById("s-wordWrap").checked,
     autoSave: document.getElementById("s-autoSave").checked,
-    autoSaveDelay: parseInt(document.getElementById("s-autoSaveDelay").value),
+    autoSaveDelay: Math.round(parseFloat(document.getElementById("s-autoSaveDelay").value) * 60000),
     vimMode: document.getElementById("s-vimMode").checked,
     commitMessage: document.getElementById("s-commitMessage").value || "User saved.",
   };
