@@ -920,6 +920,25 @@ document.getElementById("preview-frame").addEventListener("load", function () {
   }
 });
 
+// Quarto's live-reload navigates the preview iframe whenever a file is
+// saved (including autosaves), and that navigation steals focus from
+// whatever the user was working in (typically the editor). Track the last
+// focused element outside the iframe and restore focus to it once the
+// reload completes.
+let lastFocusedElement = null;
+document.addEventListener("focusin", (e) => {
+  if (e.target !== document.getElementById("preview-frame")) {
+    lastFocusedElement = e.target;
+  }
+});
+document.getElementById("preview-frame").addEventListener("load", () => {
+  const frame = document.getElementById("preview-frame");
+  if (document.activeElement === frame && lastFocusedElement) {
+    const toFocus = lastFocusedElement;
+    setTimeout(() => { if (document.contains(toFocus)) toFocus.focus(); }, 0);
+  }
+});
+
 // ── Workspace ops ──────────────────────────────────────────────────────────
 async function loadRepos() {
   try {
