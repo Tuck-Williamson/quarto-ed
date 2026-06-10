@@ -575,6 +575,8 @@
 <!-- File tree context menu -->
 <div class="dropdown" id="fileContextMenu" style="position:fixed">
   <button class="dropdown-item" onclick="addContextTargetToGitignore()">Add to .gitignore</button>
+  <div class="dropdown-divider"></div>
+  <button class="dropdown-item" style="color:var(--red)" onclick="deleteContextTarget()">Delete</button>
 </div>
 
 <script>
@@ -839,6 +841,33 @@ window.addContextTargetToGitignore = async () => {
   const data = await res.json();
   if (data.untracked) {
     alert(`"${node.path}" was already tracked by git and has been removed from version control. It will be deleted from the GitHub repo on your next sync.`);
+  }
+  await loadFileTree();
+};
+
+window.deleteContextTarget = async () => {
+  const node = _contextTarget;
+  hideFileContextMenu();
+  if (!node) return;
+  const isDir = node.type === "dir";
+  if (!confirm(`Delete ${isDir ? "folder" : "file"} "${node.path}"? This removes it from the working tree and stages the deletion in git.`)) {
+    return;
+  }
+  const res = await fetch("/api/workspace/file/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: node.path, is_dir: isDir }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    alert("Failed to delete: " + (d.detail || res.statusText));
+    return;
+  }
+  const prefix = node.path + "/";
+  for (const path of [...openTabs.keys()]) {
+    if (path === node.path || (isDir && path.startsWith(prefix))) {
+      closeTab(path);
+    }
   }
   await loadFileTree();
 };

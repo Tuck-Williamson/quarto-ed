@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import zipfile
@@ -21,6 +22,7 @@ from .models import Session, User
 from .schemas import (
     AIChatRequest,
     CommitRequest,
+    DeleteFileRequest,
     FileCreateRequest,
     FileWriteRequest,
     GitignoreAddRequest,
@@ -673,6 +675,38 @@ async def add_to_gitignore(request: Request, body: GitignoreAddRequest):
         untracked = rm_proc.returncode == 0
 
     return {"status": "ok", "added": added, "untracked": untracked}
+
+
+@router.post("/api/workspace/file/delete")
+async def delete_file(request: Request, body: DeleteFileRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, body.path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    rel = body.path.strip("/")
+
+    rm_cmd = ["git", "-C", sess.workspace_path, "rm", "-q", "-f"]
+    if body.is_dir:
+        rm_cmd.append("-r")
+    rm_cmd += ["--", rel]
+    rm_proc = await asyncio.create_subprocess_exec(
+        *rm_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await rm_proc.wait()
+
+    # git rm fails for untracked files; fall back to plain filesystem removal.
+    if os.path.exists(full_path):
+        if body.is_dir:
+            shutil.rmtree(full_path)
+        else:
+            os.remove(full_path)
+
+    return {"status": "ok"}
 
 
 # ── Settings API ──────────────────────────────────────────────────────────────

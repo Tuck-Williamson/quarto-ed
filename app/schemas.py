@@ -24,6 +24,11 @@ class GitignoreAddRequest(BaseModel):
     is_dir: bool = False
 
 
+class DeleteFileRequest(BaseModel):
+    path: str
+    is_dir: bool = False
+
+
 class SettingsSaveRequest(BaseModel):
     settings: dict
     snippets: list | None = None
