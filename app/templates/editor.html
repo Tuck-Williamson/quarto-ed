@@ -98,7 +98,7 @@
     .tree-item.active { background: rgba(88,166,255,0.15); color: var(--accent); }
     .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; }
     .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tree-item .name.ignored { text-decoration: underline wavy var(--purple); text-underline-offset: 3px; }
+    .tree-item .ignored { text-decoration: underline wavy var(--purple) 1pt; text-underline-offset: 3px; color: var(--purple); }
     .tree-dir > .tree-children { padding-left: 1rem; }
     .tree-children.hidden { display: none; }
     .sidebar-footer { padding: 0.4rem 0.5rem; border-top: 1px solid var(--border);
@@ -726,7 +726,7 @@ function renderTree(nodes, container) {
       const wrapper = document.createElement("div");
       wrapper.className = "tree-dir";
       const header = document.createElement("div");
-      header.className = "tree-item";
+      header.className = "tree-item" + (node.ignored ? " ignored" : "");
       header.innerHTML = `<span class="icon">▸</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}/</span>`;
       const children = document.createElement("div");
       children.className = "tree-children hidden";
@@ -741,7 +741,7 @@ function renderTree(nodes, container) {
       container.appendChild(wrapper);
     } else {
       const item = document.createElement("div");
-      item.className = "tree-item" + (node.path === currentFile ? " active" : "");
+      item.className = "tree-item" + (node.path === currentFile ? " active" : "") + (node.ignored ? " ignored" : "");
       item.innerHTML = `<span class="icon">📄</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}</span>`;
       item.addEventListener("click", () => openFile(node.path));
       item.addEventListener("contextmenu", (e) => showFileContextMenu(e, node));
