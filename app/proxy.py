@@ -1,8 +1,11 @@
 import asyncio
+import io
 import json
 import os
 import re
 import socket
+import subprocess
+import zipfile
 
 import httpx
 import websockets
@@ -45,6 +48,19 @@ _QUARTO_ENV_ALLOWLIST = frozenset({
 })
 
 _GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _get_quarto_version() -> str:
+    try:
+        result = subprocess.run(
+            ["quarto", "--version"], capture_output=True, text=True, timeout=10
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+_QUARTO_VERSION = _get_quarto_version()
 
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
@@ -292,6 +308,7 @@ async def editor(request: Request):
             "repo_owner": sess.repo_owner or "",
             "repo_name": sess.repo_name or "",
             "ai_enabled": bool(_ANTHROPIC_KEY),
+            "quarto_version": _QUARTO_VERSION,
         },
     )
 
@@ -358,7 +375,19 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise HTTPException(status_code=400, detail=f"git pull failed: {_redact(stderr.decode(), access_token)}")
+            stderr_str = _redact(stderr.decode(), access_token)
+            if "would be overwritten" in stderr_str or "Please commit" in stderr_str:
+                stat = await asyncio.create_subprocess_exec(
+                    "git", "-C", workspace_path, "status", "--porcelain",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                stat_out, _ = await stat.communicate()
+                files = [ln[3:] for ln in stat_out.decode().splitlines() if ln.strip()]
+                raise HTTPException(
+                    status_code=409,
+                    detail={"type": "local_changes", "files": files},
+                )
+            raise HTTPException(status_code=400, detail=f"git pull failed: {stderr_str}")
     else:
         clone_url = (
             f"https://oauth2:{access_token}@github.com/"
@@ -422,6 +451,68 @@ async def sync_workspace(request: Request, body: SyncRequest):
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0 and b"nothing to commit" not in stdout + stderr:
             raise HTTPException(status_code=500, detail=f"Command failed: {stderr.decode()}")
+
+    return {"status": "ok"}
+
+
+@router.get("/api/workspace/changes.zip")
+async def download_local_changes(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", sess.workspace_path, "status", "--porcelain",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    files = [ln[3:].strip() for ln in out.decode().splitlines() if ln.strip()]
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in files:
+            full = os.path.join(sess.workspace_path, rel)
+            if os.path.isfile(full):
+                zf.write(full, rel)
+    buf.seek(0)
+
+    repo = os.path.basename(sess.workspace_path)
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{repo}-local-changes.zip"'},
+    )
+
+
+@router.post("/api/workspace/discard")
+async def discard_local_changes(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+
+    path = sess.workspace_path
+    branch_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    branch_out, _ = await branch_proc.communicate()
+    branch = branch_out.decode().strip() or "main"
+
+    for cmd in [
+        ["git", "-C", path, "fetch", "origin"],
+        ["git", "-C", path, "reset", "--hard", f"origin/{branch}"],
+        ["git", "-C", path, "clean", "-fd"],
+    ]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
 
     return {"status": "ok"}
 
@@ -682,9 +773,21 @@ async def get_preview_logs(request: Request):
     return {"lines": _preview_logs.get(sess.user_id, []), "running": running}
 
 
+@router.post("/api/preview/restart")
+async def restart_preview(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
+    await kill_quarto_preview(sess.user_id)
+    port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id)
+    return {"status": "ok", "port": port}
+
+
 # ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
 
-_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding"}
+_STRIP_REQ_HEADERS = {"host", "connection", "transfer-encoding", "accept-encoding"}
 _STRIP_RESP_HEADERS = {"host", "connection", "transfer-encoding", "content-encoding", "content-length"}
 
 

@@ -38,6 +38,8 @@
     .btn-red:hover { background: #8a2222; }
     .btn-ghost { background: transparent; border-color: transparent; }
     .btn-ghost:hover { background: var(--bg3); }
+    .btn-ghost.btn-red { color: var(--red); }
+    .btn-ghost.btn-red:hover { background: #8a2222; color: #fff; }
 
     /* ── Three-pane layout ── */
     .layout { display: flex; flex: 1; overflow: hidden; }
@@ -333,9 +335,10 @@
       <!-- Preview -->
       <div class="panel-pane active" id="panel-preview">
         <div class="preview-toolbar">
-          <button class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
+          <button id="preview-start-btn" class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
           <button class="btn btn-ghost" onclick="reloadPreview()" style="font-size:0.72rem" title="Reload">↺</button>
           <span class="preview-note">Auto-reloads on save</span>
+          <span class="preview-note" style="margin-left:auto">Quarto {{ quarto_version }}</span>
         </div>
         <iframe id="preview-frame" src="about:blank" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
       </div>
@@ -476,6 +479,18 @@
   <div class="actions">
     <button class="btn" onclick="document.getElementById('settingsRepoDialog').close()">Skip for now</button>
     <button class="btn btn-green" onclick="createSettingsRepo()">Create repo</button>
+  </div>
+</dialog>
+
+<dialog id="conflictDialog">
+  <h3>Local changes conflict with remote</h3>
+  <p>Your workspace has local changes that would be overwritten by the latest version from GitHub.</p>
+  <div id="conflictFileList" style="max-height:160px;overflow-y:auto;margin:0.5rem 0;font-size:0.78rem;color:var(--text2);font-family:monospace;white-space:pre;"></div>
+  <p style="color:var(--red);font-size:0.8rem;margin-top:0.5rem;">&#9888; Discarding local changes is permanent and cannot be undone.</p>
+  <div class="actions">
+    <button class="btn" onclick="document.getElementById('conflictDialog').close()">Cancel</button>
+    <button class="btn btn-green" onclick="downloadAndDiscard()">Download zip &amp; Discard</button>
+    <button class="btn btn-red" onclick="discardLocal()">Discard local changes</button>
   </div>
 </dialog>
 
@@ -756,10 +771,23 @@ let _previewActive = false;
 window.loadPreview = () => {
   _previewActive = true;
   document.getElementById("preview-frame").src = "/api/preview/";
+  const btn = document.getElementById("preview-start-btn");
+  btn.textContent = "↻ Re-start preview";
+  btn.onclick = restartPreview;
 };
 window.reloadPreview = () => {
   const f = document.getElementById("preview-frame");
   f.src = f.src;
+};
+window.restartPreview = async () => {
+  const btn = document.getElementById("preview-start-btn");
+  btn.disabled = true;
+  try {
+    await fetch("/api/preview/restart", { method: "POST" });
+    document.getElementById("preview-frame").src = "/api/preview/";
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // Guard: if quarto's live-reload navigates the iframe outside /api/preview/,
@@ -803,9 +831,44 @@ window.loadWorkspace = async () => {
   if (res.ok) {
     document.getElementById("loadDialog").close();
     location.reload();
+  } else if (res.status === 409) {
+    const d = await res.json().catch(() => ({}));
+    const files = (d.detail && d.detail.files) || [];
+    document.getElementById("conflictFileList").textContent =
+      files.length ? files.join("\n") : "(no file list available)";
+    document.getElementById("loadDialog").close();
+    document.getElementById("conflictDialog").showModal();
   } else {
     const d = await res.json().catch(() => ({}));
     alert("Load failed: " + (d.detail || res.statusText));
+  }
+};
+
+window.downloadAndDiscard = async () => {
+  const a = document.createElement("a");
+  a.href = "/api/workspace/changes.zip";
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => discardLocal(), 500);
+};
+
+window.discardLocal = async () => {
+  document.getElementById("conflictDialog").close();
+  const res = await fetch("/api/workspace/discard", { method: "POST" });
+  if (!res.ok) { alert("Failed to discard local changes."); return; }
+  const owner = document.getElementById("repoOwner").value.trim();
+  const name  = document.getElementById("repoName").value.trim();
+  const res2 = await fetch("/api/workspace/load", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo_owner: owner, repo_name: name }),
+  });
+  if (res2.ok) { location.reload(); }
+  else {
+    const d = await res2.json().catch(() => ({}));
+    alert("Load failed after discard: " + (d.detail || res2.statusText));
   }
 };
 
