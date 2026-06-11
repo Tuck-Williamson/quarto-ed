@@ -157,12 +157,12 @@ async def _ensure_quarto_venv(workspace_path: str, user_id: int, env: dict) -> s
 
     if not os.path.exists(python_bin):
         proc = await asyncio.create_subprocess_exec(
+            *sandbox.setpriv_args(user_id),
             "python3", "-m", "venv", "--system-site-packages", venv_path,
             env=env,
             cwd=workspace_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            **sandbox.drop_privileges_kwargs(user_id),
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -236,6 +236,7 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
     env = _quarto_env(user_id, python_bin)
 
     process = await asyncio.create_subprocess_exec(
+        *sandbox.setpriv_args(user_id),
         "quarto", "preview", workspace_path,
         "--port", str(port),
         "--host", "127.0.0.1",
@@ -244,7 +245,6 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
         cwd=workspace_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        **sandbox.drop_privileges_kwargs(user_id),
     )
 
     _preview_processes[user_id] = process

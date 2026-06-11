@@ -305,6 +305,27 @@ def test_ensure_user_account_idempotent():
     uid2, gid2 = ensure_user_account(900001)
     assert (uid1, gid1) == (uid2, gid2)
     assert uid1 >= 20000
+    # GID must be deterministic (== UID), not allocation-order dependent:
+    # on a persistent /workspace, gids assigned in login order would let
+    # users inherit each other's group-owned files across restarts.
+    assert gid1 == uid1
+
+
+@requires_root
+def test_setpriv_args_drop_privileges_in_child():
+    """The setpriv prefix must actually run the child as the sandbox account
+    with root's supplementary groups cleared. A command prefix is used instead
+    of Popen's user=/group= kwargs because uvloop's subprocess_exec rejects
+    those kwargs (the app runs under uvloop)."""
+    from app.sandbox import ensure_user_account, setpriv_args
+    uid, gid = ensure_user_account(900002)
+    result = subprocess.run(
+        [*setpriv_args(900002), "id"],
+        capture_output=True, text=True, check=True,
+    )
+    assert f"uid={uid}" in result.stdout
+    assert f"gid={gid}" in result.stdout
+    assert "(root)" not in result.stdout
 
 
 @requires_root
@@ -578,9 +599,9 @@ def test_ensure_user_account_returns_own_ids_when_not_root():
 
 
 @requires_non_root
-def test_drop_privileges_kwargs_empty_when_not_root():
-    from app.sandbox import drop_privileges_kwargs
-    assert drop_privileges_kwargs(900021) == {}
+def test_setpriv_args_empty_when_not_root():
+    from app.sandbox import setpriv_args
+    assert setpriv_args(900021) == []
 
 
 @requires_non_root

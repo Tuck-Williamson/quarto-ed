@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app as root (e.g. Heroku Common Runtime), instead of raising on every
   workspace request. Per-user OS sandboxing still applies in full when
   running as root.
+- Preview spawn failed under uvloop (`ValueError: unexpected kwargs: user,
+  group`) when sandboxing was active -- privileges are now dropped via a
+  `setpriv` command prefix instead of Popen's `user=`/`group=` kwargs,
+  which uvloop does not support.
+- Sandbox account GIDs are now deterministic (`20000 + user_id`, matching
+  the UID). Previously `useradd --system --user-group` allocated GIDs in
+  login order, which could let users inherit each other's group-owned
+  workspace files across restarts on persistent-volume deployments.
 
 ## [0.1.0] - 2026-06-10
 
