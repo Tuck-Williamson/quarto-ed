@@ -63,6 +63,15 @@ Set your GitHub OAuth App callback URL to `https://<app-name>.herokuapp.com/auth
 
 Push to `main` to trigger a build and deploy.
 
+### Review apps (PRs)
+
+`app.json` configures a Heroku Pipeline "Review Apps" stage so each pull
+request gets an ephemeral preview deployment with its own database. GitHub
+OAuth login on a review app requires a dedicated review-app OAuth App whose
+callback URL currently points at that review app — only one review app can
+do OAuth login at a time, and the maintainer updates the callback URL as
+needed when reviewing a specific PR.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -76,6 +85,18 @@ Push to `main` to trigger a build and deploy.
 | `ANTHROPIC_API_KEY` | No | Enables AI writing assistant panel |
 | `AI_MODEL` | No (default `claude-sonnet-4-6`) | Claude model ID for AI chat |
 | `WORKSPACE_BASE` | No (default `/workspace`) | Base path for user workspaces |
+
+## Versioning
+
+quarto-ed follows [Semantic Versioning](https://semver.org). The running
+app reports its version via:
+
+- The `/api/version` endpoint — returns JSON with the app version, git
+  commit SHA, and the bundled Quarto version.
+- The Preview panel toolbar in the editor, e.g. `quarto-ed 0.1.0 (abc1234)`.
+
+When reporting a bug, please include this version string — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and the bug report template.
 
 ## Known limitations
 
@@ -110,3 +131,13 @@ userdel qe<user_id>
 groupdel qe<user_id>   # if not removed automatically
 rm -rf /workspace/<username>
 ```
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, the PR workflow, CI checks, and our versioning policy.
+
+By participating, you're expected to follow our
+[Code of Conduct](CODE_OF_CONDUCT.md). Use the
+[issue templates](.github/ISSUE_TEMPLATE/) to report bugs or request
+features.

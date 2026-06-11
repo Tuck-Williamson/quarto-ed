@@ -1,0 +1,31 @@
+name: Documentation
+description: Report missing, unclear, or incorrect documentation
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues with the README, CONTRIBUTING guide, or in-app docs/help text.
+
+  - type: input
+    id: location
+    attributes:
+      label: Location
+      description: File or page where the documentation issue is (e.g. README.md, CONTRIBUTING.md, a specific section).
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: What's wrong or missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix
+      description: If you have a proposed wording or structure, share it here.
+    validations:
+      required: false

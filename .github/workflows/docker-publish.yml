@@ -15,12 +15,18 @@ jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute build metadata (version, short SHA)
+        run: |
+          echo "SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)" >> $GITHUB_ENV
+          APP_VERSION=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('app/__init__.py').read()).group(1))")
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
 
       - name: Lowercase image name
         run: |
@@ -54,6 +60,8 @@ jobs:
           load: true
           push: false
           tags: app:ci
+          build-args: |
+            GIT_SHA=${{ env.SHORT_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -84,11 +92,12 @@ jobs:
       - name: Push production image to ghcr.io
         if: github.event_name != 'pull_request'
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           docker tag app:ci "$GHCR_IMAGE:latest"
           docker tag app:ci "$GHCR_IMAGE:sha-${SHORT_SHA}"
+          docker tag app:ci "$GHCR_IMAGE:v${APP_VERSION}"
           docker push "$GHCR_IMAGE:latest"
           docker push "$GHCR_IMAGE:sha-${SHORT_SHA}"
+          docker push "$GHCR_IMAGE:v${APP_VERSION}"
 
       # ── Deploy to Heroku ────────────────────────────────────────────────
       - name: Log in to Heroku registry
@@ -115,3 +124,17 @@ jobs:
             -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
             -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
             -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"${{ steps.heroku_push.outputs.image_id }}\"}]}"
+
+      # ── Auto-tag & release on version bump ───────────────────────────────
+      - name: Tag and release new version
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${APP_VERSION}" > /dev/null 2>&1; then
+            echo "Tag v${APP_VERSION} already exists, skipping release."
+          else
+            git tag "v${APP_VERSION}"
+            git push origin "v${APP_VERSION}"
+            gh release create "v${APP_VERSION}" --generate-notes --title "v${APP_VERSION}"
+          fi
