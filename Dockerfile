@@ -38,9 +38,12 @@ RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
+ARG GIT_SHA=unknown
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/quarto/bin:/root/.TinyTeX/bin/x86_64-linux:/usr/local/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    GIT_SHA=$GIT_SHA
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3-pip git openssh-client ca-certificates \

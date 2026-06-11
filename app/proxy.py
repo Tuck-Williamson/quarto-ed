@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, Streamin
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 
-from . import sandbox
+from . import __version__, sandbox
 from .auth import get_current_session
 from .database import decrypt_token, get_db_session
 from .models import Session, User
@@ -65,6 +65,7 @@ def _get_quarto_version() -> str:
 
 
 _QUARTO_VERSION = _get_quarto_version()
+_GIT_SHA = os.environ.get("GIT_SHA", "unknown")
 
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
@@ -361,6 +362,17 @@ async def _push_settings(local_path: str, message: str = "Update settings"):
             break  # nothing to commit is fine
 
 
+# ── Version / health ─────────────────────────────────────────────────────────
+
+@router.get("/api/version")
+async def get_version():
+    return {
+        "version": __version__,
+        "git_sha": _GIT_SHA,
+        "quarto_version": _QUARTO_VERSION,
+    }
+
+
 # ── Editor page ───────────────────────────────────────────────────────────────
 
 @router.get("/editor", response_class=HTMLResponse)
@@ -381,6 +393,8 @@ async def editor(request: Request):
             "repo_name": sess.repo_name or "",
             "ai_enabled": bool(_ANTHROPIC_KEY),
             "quarto_version": _QUARTO_VERSION,
+            "app_version": __version__,
+            "git_sha": _GIT_SHA,
         },
     )
 

@@ -407,7 +407,7 @@
           <button id="preview-start-btn" class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
           <button class="btn btn-ghost" onclick="reloadPreview()" style="font-size:0.72rem" title="Reload">↺</button>
           <span class="preview-note">Auto-reloads on save</span>
-          <span class="preview-note" style="margin-left:auto">Quarto {{ quarto_version }}</span>
+          <span class="preview-note" style="margin-left:auto">quarto-ed {{ app_version }} ({{ git_sha }}) · Quarto {{ quarto_version }}</span>
         </div>
         <iframe id="preview-frame" src="about:blank" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
       </div>

@@ -1,0 +1,42 @@
+{
+  "name": "quarto-ed",
+  "description": "Browser-based Quarto editor with GitHub OAuth, live preview, and AI chat assistant.",
+  "repository": "https://github.com/Tuck-Williamson/quarto-ed",
+  "stack": "container",
+  "addons": [
+    "heroku-postgresql:essential-0"
+  ],
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "env": {
+    "GITHUB_CLIENT_ID": {
+      "description": "<TODO: set once in the pipeline's Review Apps config vars> Client ID for a dedicated 'quarto-ed (review apps)' GitHub OAuth App with a fixed callback URL.",
+      "required": true
+    },
+    "GITHUB_CLIENT_SECRET": {
+      "description": "<TODO: set once in the pipeline's Review Apps config vars> Client secret for the dedicated review-app GitHub OAuth App.",
+      "required": true
+    },
+    "SECRET_KEY": {
+      "description": "Session cookie signing key, auto-generated per review app.",
+      "generator": "secret"
+    },
+    "TOKEN_ENCRYPTION_KEY": {
+      "description": "<TODO: set once in the pipeline's Review Apps config vars> Fernet key for encrypting GitHub tokens at rest. Generate with: python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\". Heroku's secret generator does not produce a valid Fernet key, so this cannot be auto-generated.",
+      "required": true
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Optional, enables the AI chat panel in review apps. <TODO: set once in the pipeline's Review Apps config vars if desired> (the production key can be reused).",
+      "required": false
+    },
+    "AI_MODEL": {
+      "description": "Claude model ID for AI chat.",
+      "value": "claude-sonnet-4-6",
+      "required": false
+    }
+  }
+}

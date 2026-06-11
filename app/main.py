@@ -5,6 +5,7 @@ from sqlalchemy import update
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import __version__
 from .auth import router as auth_router
 from .database import engine, get_db_session
 from .models import Base, Session
@@ -15,7 +16,7 @@ from .proxy import router as proxy_router
 # group-writable for the sandboxed quarto preview process to use them.
 os.umask(0o002)
 
-app = FastAPI(title="quarto-ed")
+app = FastAPI(title="quarto-ed", version=__version__)
 
 app.add_middleware(
     SessionMiddleware,

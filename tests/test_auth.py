@@ -1,11 +1,22 @@
 """Tests for auth routes: root redirect, login page, editor access."""
 import pytest
 
+from app import __version__
+
 
 async def test_root_unauthenticated_redirects_to_login(anon_client):
     resp = await anon_client.get("/", follow_redirects=False)
     assert resp.status_code in (301, 302, 307, 308)
     assert resp.headers["location"] == "/login"
+
+
+async def test_api_version(anon_client):
+    resp = await anon_client.get("/api/version")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["version"] == __version__
+    assert "git_sha" in body
+    assert "quarto_version" in body
 
 
 async def test_root_authenticated_redirects_to_editor(auth_client):
