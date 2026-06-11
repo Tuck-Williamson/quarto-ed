@@ -1,5 +1,33 @@
 # Security Policy
 
+## Multi-user isolation and deployment trust model
+
+`quarto preview` executes arbitrary user-authored code (Python, R, and shell
+chunks) on behalf of whoever is logged in. `app/sandbox.py` isolates each
+authenticated user's `quarto preview` process under a dedicated, unprivileged
+OS account (`qe<user_id>`) with a locked-down workspace directory -- but this
+**requires the app to run as root**.
+
+Most container platforms, including **Heroku's Common Runtime, never run the
+app as root** -- every dyno already runs as its own fixed, unprivileged user
+with setuid/setgid escalation disabled at the kernel level. On these
+platforms, `app/sandbox.py` detects this (`sandboxing_available()` returns
+`False`) and becomes a no-op: every user's `quarto preview` process runs as
+the app's own uid, with **no filesystem isolation between users**. A
+malicious or compromised account could read other users' workspace files (and
+potentially the app's own environment, depending on the platform's `/proc`
+restrictions).
+
+**If you can't run as root** (Heroku, most PaaS deployments), set
+`ALLOWED_GITHUB_USERS` to a comma-separated allowlist of trusted GitHub
+usernames -- this is the access boundary between users on those deployments.
+Leaving it unset allows *any* GitHub account to log in and run code in the
+shared, unsandboxed environment.
+
+**If you run as root** (local Docker, or a self-hosted deployment with a
+privileged/root container), the per-user sandbox in `app/sandbox.py` applies
+automatically and `ALLOWED_GITHUB_USERS` is optional.
+
 ## Supported Versions
 
 quarto-ed is pre-1.0 and under active development. Only the latest released

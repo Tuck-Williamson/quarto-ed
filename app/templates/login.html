@@ -46,12 +46,26 @@
       border-top: 1px solid #30363d;
       padding-top: 1rem;
     }
+    .error {
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+      color: #f85149;
+      background: #2d1214;
+      border: 1px solid #f85149;
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+    }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">quarto-ed</div>
     <div class="subtitle">Edit Quarto documents in your browser</div>
+    {% if request.query_params.get("error") == "access_denied" %}
+    <div class="error">
+      This GitHub account isn't authorized to use this instance.
+    </div>
+    {% endif %}
     <a class="btn-github" href="/auth/github">
       <svg height="18" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38

@@ -2,12 +2,27 @@
 import pytest
 
 from app import __version__
+from app.auth import _is_user_allowed
 
 
 async def test_root_unauthenticated_redirects_to_login(anon_client):
     resp = await anon_client.get("/", follow_redirects=False)
     assert resp.status_code in (301, 302, 307, 308)
     assert resp.headers["location"] == "/login"
+
+
+def test_is_user_allowed_empty_allowlist_allows_everyone(monkeypatch):
+    from app import auth
+    monkeypatch.setattr(auth, "_ALLOWED_USERS", set())
+    assert _is_user_allowed("anyone") is True
+
+
+def test_is_user_allowed_checks_allowlist_case_insensitively(monkeypatch):
+    from app import auth
+    monkeypatch.setattr(auth, "_ALLOWED_USERS", {"tuck-williamson"})
+    assert _is_user_allowed("Tuck-Williamson") is True
+    assert _is_user_allowed("tuck-williamson") is True
+    assert _is_user_allowed("someone-else") is False
 
 
 async def test_api_version(anon_client):

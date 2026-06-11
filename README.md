@@ -85,6 +85,7 @@ needed when reviewing a specific PR.
 | `ANTHROPIC_API_KEY` | No | Enables AI writing assistant panel |
 | `AI_MODEL` | No (default `claude-sonnet-4-6`) | Claude model ID for AI chat |
 | `WORKSPACE_BASE` | No (default `/workspace`) | Base path for user workspaces |
+| `ALLOWED_GITHUB_USERS` | No | Comma-separated GitHub usernames allowed to log in. See [Security model](#security-model) |
 
 ## Versioning
 
@@ -97,6 +98,19 @@ app reports its version via:
 
 When reporting a bug, please include this version string — see
 [CONTRIBUTING.md](CONTRIBUTING.md) and the bug report template.
+
+## Security model
+
+`quarto preview` executes arbitrary user-authored code (Python, R, shell
+chunks). `app/sandbox.py` isolates each user's preview process under its own
+OS account -- but only when the app runs **as root**. Heroku's Common Runtime
+(and most PaaS platforms) never run the app as root, so on those deployments
+sandboxing is a no-op and **all logged-in users share the same OS user with
+no filesystem isolation between them**.
+
+If you can't run as root, set `ALLOWED_GITHUB_USERS` to a comma-separated
+list of trusted GitHub usernames -- this is the access boundary in that case.
+See [SECURITY.md](SECURITY.md) for details.
 
 ## Known limitations
 

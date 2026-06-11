@@ -9,6 +9,10 @@ Sections:
   E. Command injection resilience in subprocess calls
   F. Quarto render integration — Python chunk cannot read server secrets
      (covers the SQL-via-DATABASE_URL vector as well)
+  G. Per-user OS sandbox — cross-user isolation via UID/GID separation
+     (requires root; runs in Dockerfile.test CI)
+  H. Sandbox no-op fallback — platforms that don't run as root (e.g. Heroku)
+     (requires non-root; this is the normal local/dev pytest case)
 """
 import os
 import shutil
@@ -301,6 +305,27 @@ def test_ensure_user_account_idempotent():
     uid2, gid2 = ensure_user_account(900001)
     assert (uid1, gid1) == (uid2, gid2)
     assert uid1 >= 20000
+    # GID must be deterministic (== UID), not allocation-order dependent:
+    # on a persistent /workspace, gids assigned in login order would let
+    # users inherit each other's group-owned files across restarts.
+    assert gid1 == uid1
+
+
+@requires_root
+def test_setpriv_args_drop_privileges_in_child():
+    """The setpriv prefix must actually run the child as the sandbox account
+    with root's supplementary groups cleared. A command prefix is used instead
+    of Popen's user=/group= kwargs because uvloop's subprocess_exec rejects
+    those kwargs (the app runs under uvloop)."""
+    from app.sandbox import ensure_user_account, setpriv_args
+    uid, gid = ensure_user_account(900002)
+    result = subprocess.run(
+        [*setpriv_args(900002), "id"],
+        capture_output=True, text=True, check=True,
+    )
+    assert f"uid={uid}" in result.stdout
+    assert f"gid={gid}" in result.stdout
+    assert "(root)" not in result.stdout
 
 
 @requires_root
@@ -544,3 +569,55 @@ def test_cross_user_isolation_python_r_bash_chunks():
         shutil.rmtree(base_a, ignore_errors=True)
         shutil.rmtree(base_b, ignore_errors=True)
         shutil.rmtree(Path(_WORKSPACE_BASE) / str(user_a), ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# H. Sandbox no-op fallback — platforms that don't run as root (e.g. Heroku)
+#
+# Heroku's Common Runtime (and most PaaS platforms) never run the app as
+# root: useradd/chown/setuid all require root and would raise. app/sandbox.py
+# detects this via sandboxing_available() and becomes a no-op, so the app
+# stays functional (with no per-user OS isolation -- see SECURITY.md).
+# ---------------------------------------------------------------------------
+
+requires_non_root = pytest.mark.skipif(
+    os.geteuid() == 0, reason="fallback tests require running as non-root"
+)
+
+
+@requires_non_root
+def test_sandboxing_unavailable_when_not_root():
+    from app.sandbox import sandboxing_available
+    assert sandboxing_available() is False
+
+
+@requires_non_root
+def test_ensure_user_account_returns_own_ids_when_not_root():
+    from app.sandbox import ensure_user_account
+    uid, gid = ensure_user_account(900020)
+    assert (uid, gid) == (os.geteuid(), os.getegid())
+
+
+@requires_non_root
+def test_setpriv_args_empty_when_not_root():
+    from app.sandbox import setpriv_args
+    assert setpriv_args(900021) == []
+
+
+@requires_non_root
+def test_ensure_dir_owned_creates_dir_without_chown(tmp_path):
+    from app.sandbox import ensure_dir_owned
+    target = tmp_path / "homedir"
+    ensure_dir_owned(str(target), uid=12345, gid=12345)
+    assert target.is_dir()
+
+
+@requires_non_root
+def test_ensure_workspace_owned_creates_dir_without_chown(tmp_path):
+    from app.sandbox import ensure_workspace_owned
+    target = tmp_path / "workspace" / "someuser"
+    ensure_workspace_owned(str(target), 900022)
+    assert target.is_dir()
+    # No marker/chmod-2770 dance -- nothing to mark, since there's no
+    # separate sandbox account to grant access to.
+    assert not (target / ".qe-sandbox-initialized").exists()

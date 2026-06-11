@@ -10,15 +10,29 @@ workspaces and /proc/<pid>/environ of the server process itself.
 This module gives each authenticated GitHub user a dedicated, deterministic
 system account (`qe<user_id>`) and helpers to lock down their workspace
 directory so only that account (and root) can access it. `spawn_quarto_preview`
-in app/proxy.py runs the quarto subprocess as that account via
-subprocess's `user=`/`group=` kwargs.
+in app/proxy.py runs the quarto subprocess as that account by prefixing the
+command with `setpriv` (util-linux). Popen's `user=`/`group=` kwargs are NOT
+used because uvloop's subprocess_exec does not support them (uvicorn runs on
+uvloop in the container).
 
 INVARIANT: root must never execute, import, or source code from inside
 /workspace/<username>/... -- only read/write it directly (file API, git).
 Workspace directories are made group-writable by the per-user account, so
 executing user-supplied content as root would be a privilege-escalation
 path back to root.
+
+NOT ROOT: creating accounts, chowning files to them, and running subprocesses
+as them all require root. Platforms like Heroku's Common Runtime never run
+the app as root -- by design, every dyno already runs as its own fixed,
+unprivileged, single-purpose user, with setuid/setgid binaries and file
+capabilities disabled (NoNewPrivs) so a containerized app can never escalate
+out of that uid. On such platforms `sandboxing_available()` is False and
+every function below becomes a no-op: `quarto preview` for every user runs as
+the app's own uid, with no per-user filesystem isolation. See SECURITY.md --
+deployments that can't run as root should restrict who can log in via
+ALLOWED_GITHUB_USERS instead.
 """
+import grp
 import os
 import pwd
 import subprocess
@@ -30,12 +44,23 @@ def _account_name(user_id: int) -> str:
     return f"qe{user_id}"
 
 
+def sandboxing_available() -> bool:
+    """Per-user OS sandboxing requires root. Returns False on platforms (e.g.
+    Heroku Common Runtime) where the app already runs as a fixed,
+    unprivileged user."""
+    return os.geteuid() == 0
+
+
 def ensure_user_account(user_id: int) -> tuple[int, int]:
     """Idempotently create a system account `qe<user_id>` with a deterministic
     UID/GID (so ownership stays consistent across container restarts).
 
-    Returns (uid, gid).
+    Returns (uid, gid). If sandboxing isn't available (not running as root),
+    returns the app's own (uid, gid) -- subprocesses simply inherit it.
     """
+    if not sandboxing_available():
+        return os.geteuid(), os.getegid()
+
     name = _account_name(user_id)
     try:
         pw = pwd.getpwnam(name)
@@ -44,6 +69,20 @@ def ensure_user_account(user_id: int) -> tuple[int, int]:
         pass
 
     uid = _UID_GID_BASE + user_id
+    # Create the group explicitly with --gid: `useradd --system --user-group`
+    # would allocate the GID from the system range (100-999) in login order,
+    # which is NOT stable across container restarts -- on a persistent
+    # /workspace volume, two users logging in in a different order would
+    # inherit each other's group-owned files.
+    try:
+        grp.getgrnam(name)
+    except KeyError:
+        subprocess.run(
+            ["groupadd", "--gid", str(uid), name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     subprocess.run(
         [
             "useradd",
@@ -51,7 +90,7 @@ def ensure_user_account(user_id: int) -> tuple[int, int]:
             "--no-create-home",
             "--shell", "/usr/sbin/nologin",
             "--uid", str(uid),
-            "--user-group",
+            "--gid", str(uid),
             name,
         ],
         check=True,
@@ -63,8 +102,14 @@ def ensure_user_account(user_id: int) -> tuple[int, int]:
 
 
 def ensure_dir_owned(path: str, uid: int, gid: int, mode: int = 0o700) -> None:
-    """Create `path` if missing and ensure it is owned uid:gid with `mode`."""
+    """Create `path` if missing and ensure it is owned uid:gid with `mode`.
+
+    No-op for the chown/chmod when sandboxing isn't available -- the app's
+    own uid already owns whatever it creates.
+    """
     os.makedirs(path, exist_ok=True)
+    if not sandboxing_available():
+        return
     os.chown(path, uid, gid)
     os.chmod(path, mode)
 
@@ -94,9 +139,15 @@ def ensure_workspace_owned(base_path: str, user_id: int) -> None:
     content (relevant for local dev with a persistent workspace volume
     created before this sandboxing was added, or after a dyno restart wipes
     just the marker but leaves git data behind).
+
+    No-op beyond creating `base_path` when sandboxing isn't available --
+    there's no separate sandbox account to grant access to.
     """
     uid, gid = ensure_user_account(user_id)
     os.makedirs(base_path, exist_ok=True)
+
+    if not sandboxing_available():
+        return
 
     marker = os.path.join(base_path, ".qe-sandbox-initialized")
     if not os.path.exists(marker):
@@ -116,7 +167,24 @@ def ensure_workspace_owned(base_path: str, user_id: int) -> None:
     os.chmod(base_path, 0o2770)  # nosec B103
 
 
-def drop_privileges_kwargs(user_id: int) -> dict:
-    """subprocess kwargs to run a child process as the user's sandbox account."""
+def setpriv_args(user_id: int) -> list[str]:
+    """argv prefix to run a child process as the user's sandbox account, e.g.
+    ["setpriv", "--reuid", "20007", "--regid", "20007", "--clear-groups"].
+
+    A command prefix is used instead of Popen's `user=`/`group=` kwargs
+    because uvloop's subprocess_exec rejects those kwargs, and the app runs
+    under uvloop. `--clear-groups` drops root's supplementary groups; the
+    workspace is reachable through the account's primary gid alone.
+
+    Returns [] when sandboxing isn't available, so the child simply inherits
+    the app's own (already unprivileged) uid/gid.
+    """
+    if not sandboxing_available():
+        return []
     uid, gid = ensure_user_account(user_id)
-    return {"user": uid, "group": gid}
+    return [
+        "setpriv",
+        "--reuid", str(uid),
+        "--regid", str(gid),
+        "--clear-groups",
+    ]
