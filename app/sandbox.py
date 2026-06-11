@@ -18,6 +18,17 @@ INVARIANT: root must never execute, import, or source code from inside
 Workspace directories are made group-writable by the per-user account, so
 executing user-supplied content as root would be a privilege-escalation
 path back to root.
+
+NOT ROOT: creating accounts, chowning files to them, and running subprocesses
+as them all require root. Platforms like Heroku's Common Runtime never run
+the app as root -- by design, every dyno already runs as its own fixed,
+unprivileged, single-purpose user, with setuid/setgid binaries and file
+capabilities disabled (NoNewPrivs) so a containerized app can never escalate
+out of that uid. On such platforms `sandboxing_available()` is False and
+every function below becomes a no-op: `quarto preview` for every user runs as
+the app's own uid, with no per-user filesystem isolation. See SECURITY.md --
+deployments that can't run as root should restrict who can log in via
+ALLOWED_GITHUB_USERS instead.
 """
 import os
 import pwd
@@ -30,12 +41,23 @@ def _account_name(user_id: int) -> str:
     return f"qe{user_id}"
 
 
+def sandboxing_available() -> bool:
+    """Per-user OS sandboxing requires root. Returns False on platforms (e.g.
+    Heroku Common Runtime) where the app already runs as a fixed,
+    unprivileged user."""
+    return os.geteuid() == 0
+
+
 def ensure_user_account(user_id: int) -> tuple[int, int]:
     """Idempotently create a system account `qe<user_id>` with a deterministic
     UID/GID (so ownership stays consistent across container restarts).
 
-    Returns (uid, gid).
+    Returns (uid, gid). If sandboxing isn't available (not running as root),
+    returns the app's own (uid, gid) -- subprocesses simply inherit it.
     """
+    if not sandboxing_available():
+        return os.geteuid(), os.getegid()
+
     name = _account_name(user_id)
     try:
         pw = pwd.getpwnam(name)
@@ -63,8 +85,14 @@ def ensure_user_account(user_id: int) -> tuple[int, int]:
 
 
 def ensure_dir_owned(path: str, uid: int, gid: int, mode: int = 0o700) -> None:
-    """Create `path` if missing and ensure it is owned uid:gid with `mode`."""
+    """Create `path` if missing and ensure it is owned uid:gid with `mode`.
+
+    No-op for the chown/chmod when sandboxing isn't available -- the app's
+    own uid already owns whatever it creates.
+    """
     os.makedirs(path, exist_ok=True)
+    if not sandboxing_available():
+        return
     os.chown(path, uid, gid)
     os.chmod(path, mode)
 
@@ -94,9 +122,15 @@ def ensure_workspace_owned(base_path: str, user_id: int) -> None:
     content (relevant for local dev with a persistent workspace volume
     created before this sandboxing was added, or after a dyno restart wipes
     just the marker but leaves git data behind).
+
+    No-op beyond creating `base_path` when sandboxing isn't available --
+    there's no separate sandbox account to grant access to.
     """
     uid, gid = ensure_user_account(user_id)
     os.makedirs(base_path, exist_ok=True)
+
+    if not sandboxing_available():
+        return
 
     marker = os.path.join(base_path, ".qe-sandbox-initialized")
     if not os.path.exists(marker):
@@ -117,6 +151,12 @@ def ensure_workspace_owned(base_path: str, user_id: int) -> None:
 
 
 def drop_privileges_kwargs(user_id: int) -> dict:
-    """subprocess kwargs to run a child process as the user's sandbox account."""
+    """subprocess kwargs to run a child process as the user's sandbox account.
+
+    Returns {} when sandboxing isn't available, so the child simply inherits
+    the app's own (already unprivileged) uid/gid.
+    """
+    if not sandboxing_available():
+        return {}
     uid, gid = ensure_user_account(user_id)
     return {"user": uid, "group": gid}

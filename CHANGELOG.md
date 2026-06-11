@@ -9,7 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Nothing yet.
+- `ALLOWED_GITHUB_USERS` env var to restrict login to a list of trusted
+  GitHub usernames -- the access boundary on deployments that can't run as
+  root (see SECURITY.md).
+
+### Fixed
+
+- `app/sandbox.py` now degrades gracefully on platforms that don't run the
+  app as root (e.g. Heroku Common Runtime), instead of raising on every
+  workspace request. Per-user OS sandboxing still applies in full when
+  running as root.
 
 ## [0.1.0] - 2026-06-10
 

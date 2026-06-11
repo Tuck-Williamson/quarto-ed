@@ -37,6 +37,10 @@
       "description": "Claude model ID for AI chat.",
       "value": "claude-sonnet-4-6",
       "required": false
+    },
+    "ALLOWED_GITHUB_USERS": {
+      "description": "Comma-separated GitHub usernames allowed to log in. Heroku review apps run unprivileged (no per-user OS sandbox -- see SECURITY.md), so this is the access boundary. <TODO: set to your GitHub username, or a small trusted list, in the pipeline's Review Apps config vars>.",
+      "required": false
     }
   }
 }

@@ -152,7 +152,6 @@ async def _ensure_quarto_venv(workspace_path: str, user_id: int, env: dict) -> s
     already importable; pip-installed packages still land in the venv's own
     site-packages, isolated per repo. Returns the path to the venv's python.
     """
-    uid, gid = sandbox.ensure_user_account(user_id)
     venv_path = os.path.join(workspace_path, ".venv")
     python_bin = os.path.join(venv_path, "bin", "python3")
 
@@ -160,11 +159,10 @@ async def _ensure_quarto_venv(workspace_path: str, user_id: int, env: dict) -> s
         proc = await asyncio.create_subprocess_exec(
             "python3", "-m", "venv", "--system-site-packages", venv_path,
             env=env,
-            user=uid,
-            group=gid,
             cwd=workspace_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            **sandbox.drop_privileges_kwargs(user_id),
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
@@ -243,11 +241,10 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
         "--host", "127.0.0.1",
         "--no-browser",
         env=env,
-        user=uid,
-        group=gid,
         cwd=workspace_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **sandbox.drop_privileges_kwargs(user_id),
     )
 
     _preview_processes[user_id] = process

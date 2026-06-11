@@ -24,6 +24,20 @@ oauth.register(
     client_kwargs={"scope": "read:user user:email repo"},
 )
 
+# Comma-separated GitHub usernames allowed to log in. Empty/unset = anyone
+# with a GitHub account may log in. See SECURITY.md: deployments that can't
+# run as root (e.g. Heroku) have no per-user OS sandbox (app/sandbox.py), so
+# this is the only access boundary between users on those deployments.
+_ALLOWED_USERS = {
+    u.strip().lower()
+    for u in os.environ.get("ALLOWED_GITHUB_USERS", "").split(",")
+    if u.strip()
+}
+
+
+def _is_user_allowed(username: str) -> bool:
+    return not _ALLOWED_USERS or username.lower() in _ALLOWED_USERS
+
 
 async def get_current_session(request: Request) -> Session | None:
     token = request.session.get("session_token")
@@ -64,6 +78,10 @@ async def github_callback(request: Request):
 
     github_id = profile["id"]
     username = profile["login"]
+
+    if not _is_user_allowed(username):
+        return RedirectResponse("/login?error=access_denied")
+
     encrypted = encrypt_token(token["access_token"])
 
     async with get_db_session() as db:
