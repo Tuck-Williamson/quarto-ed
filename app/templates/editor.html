@@ -175,6 +175,10 @@
       display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
       font-size: 0.75rem;
     }
+    .preview-toolbar select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text); padding: 0.2rem 0.4rem; font-size: 0.78rem;
+    }
     .preview-note { color: var(--text2); font-size: 0.72rem; }
 
     /* Logs */
@@ -405,6 +409,7 @@
       <div class="panel-pane active" id="panel-preview">
         <div class="preview-toolbar">
           <button id="preview-start-btn" class="btn btn-green" onclick="loadPreview()" style="font-size:0.72rem">▶ Start preview</button>
+          <select id="preview-target" onchange="onPreviewTargetChange()" style="font-size:0.72rem"></select>
           <button class="btn btn-ghost" onclick="reloadPreview()" style="font-size:0.72rem" title="Reload">↺</button>
           <span class="preview-note">Auto-reloads on save</span>
           <span class="preview-note" style="margin-left:auto">quarto-ed {{ app_version }} ({{ git_sha }}) · Quarto {{ quarto_version }}</span>
@@ -492,6 +497,13 @@
               <input type="text" id="s-commitMessage" value="User saved."
                      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.4rem;font-size:0.78rem"
                      oninput="onSettingChange()">
+            </div>
+          </div>
+          <div class="settings-section">
+            <h4>Preview</h4>
+            <div class="settings-row">
+              <span class="settings-label">Follow-mode restart delay (ms)</span>
+              <input type="number" id="s-previewFollowDebounce" min="0" max="5000" step="250" value="1000" onchange="onSettingChange()">
             </div>
           </div>
           <div class="settings-section">
@@ -612,7 +624,8 @@ let currentFile = null;
 const openTabs = new Map(); // path → {content, dirty, state}
 let settings = {
   theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
-  autoSave: true, autoSaveDelay: 120000, vimMode: false, commitMessage: "User saved."
+  autoSave: true, autoSaveDelay: 120000, vimMode: false, commitMessage: "User saved.",
+  previewFollowDebounce: 1000
 };
 let userSnippets = [];
 let settingsSaveTimer = null;
@@ -746,6 +759,17 @@ function switchToFile(path) {
     openTabs.get(path).state = cmView.state;
   }
   renderTabs();
+  if (path.endsWith(".qmd")) {
+    followQmdFile = path;
+    previewRawFile = null;
+    if (_previewActive && document.getElementById("preview-target").value === "follow") {
+      clearTimeout(followRestartTimer);
+      const delay = settings.previewFollowDebounce;
+      if (delay > 0) {
+        followRestartTimer = setTimeout(() => startOrRestartPreview(path), delay);
+      }
+    }
+  }
 }
 
 function closeTab(path) {
@@ -763,7 +787,42 @@ async function loadFileTree() {
   const res = await fetch("/api/files");
   if (!res.ok) return;
   const { tree } = await res.json();
+  window._lastTree = tree;
   renderTree(tree, document.getElementById("file-tree"));
+  populatePreviewTargetDropdown();
+}
+
+function flattenQmdFiles(nodes, prefix = "") {
+  const result = [];
+  for (const node of nodes) {
+    const path = prefix ? `${prefix}/${node.name}` : node.name;
+    if (node.type === "dir") {
+      result.push(...flattenQmdFiles(node.children || [], path));
+    } else if (node.name.endsWith(".qmd")) {
+      result.push(path);
+    }
+  }
+  return result;
+}
+
+function populatePreviewTargetDropdown() {
+  const select = document.getElementById("preview-target");
+  const currentValue = select.value;
+  const files = flattenQmdFiles(window._lastTree || []);
+
+  select.innerHTML = '<option value="">Project</option><option value="follow">Follow active file</option>';
+  for (const file of files) {
+    const option = document.createElement("option");
+    option.value = file;
+    option.textContent = file;
+    select.appendChild(option);
+  }
+
+  if (files.includes(currentValue)) {
+    select.value = currentValue;
+  } else {
+    select.value = "";
+  }
 }
 
 function renderTree(nodes, container) {
@@ -792,9 +851,15 @@ function renderTree(nodes, container) {
       container.appendChild(wrapper);
     } else {
       const item = document.createElement("div");
-      item.className = "tree-item" + (node.path === currentFile ? " active" : "") + (node.ignored ? " ignored" : "");
+      const ext = node.name.slice(node.name.lastIndexOf(".")).toLowerCase();
+      const isRawFile = RENDERABLE_EXTS.includes(ext);
+      item.className = "tree-item" + (node.path === currentFile || node.path === previewRawFile ? " active" : "") + (node.ignored ? " ignored" : "");
       item.innerHTML = `<span class="icon">📄</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}</span>`;
-      item.addEventListener("click", () => openFile(node.path));
+      if (isRawFile) {
+        item.addEventListener("click", () => selectPreviewRawFile(node.path));
+      } else {
+        item.addEventListener("click", () => openFile(node.path));
+      }
       item.addEventListener("contextmenu", (e) => showFileContextMenu(e, node));
       container.appendChild(item);
     }
@@ -1064,28 +1129,74 @@ window.switchPanel = (name) => {
 
 // ── Preview ────────────────────────────────────────────────────────────────
 let _previewActive = false;
+let followQmdFile = null;
+let previewRawFile = null;
+let followRestartTimer = null;
+const RENDERABLE_EXTS = [".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"];
+
+function resolveTarget() {
+  const value = document.getElementById("preview-target").value;
+  if (value === "") return null;
+  if (value === "follow") return followQmdFile;
+  return value;
+}
+
+async function startOrRestartPreview(target) {
+  const btn = document.getElementById("preview-start-btn");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/preview/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const path = data.path || "/";
+      const iframeSrc = "/api/preview/" + path.slice(1);
+      document.getElementById("preview-frame").src = iframeSrc;
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 window.loadPreview = () => {
   _previewActive = true;
-  document.getElementById("preview-frame").src = "/api/preview/";
+  startOrRestartPreview(resolveTarget());
   const btn = document.getElementById("preview-start-btn");
   btn.textContent = "↻ Re-start preview";
   btn.onclick = restartPreview;
+  populatePreviewTargetDropdown();
 };
+
 window.reloadPreview = () => {
   const f = document.getElementById("preview-frame");
   f.src = f.src;
 };
+
 window.restartPreview = async () => {
-  const btn = document.getElementById("preview-start-btn");
-  btn.disabled = true;
-  try {
-    await fetch("/api/preview/restart", { method: "POST" });
-    document.getElementById("preview-frame").src = "/api/preview/";
-  } finally {
-    btn.disabled = false;
+  await startOrRestartPreview(resolveTarget());
+};
+
+window.onPreviewTargetChange = async () => {
+  if (!_previewActive) return;
+  const target = resolveTarget();
+  if (target === "follow" && previewRawFile) {
+    document.getElementById("preview-frame").src = "/api/file/raw?path=" + encodeURIComponent(previewRawFile);
+  } else {
+    await startOrRestartPreview(target);
   }
 };
+
+function selectPreviewRawFile(path) {
+  previewRawFile = path;
+  followQmdFile = null;
+  if (_previewActive && document.getElementById("preview-target").value === "follow") {
+    document.getElementById("preview-frame").src = "/api/file/raw?path=" + encodeURIComponent(path);
+  }
+  renderTree(window._lastTree || [], document.getElementById("file-tree"));
+}
 
 // Guard: if quarto's live-reload navigates the iframe outside /api/preview/,
 // redirect it back so the editor UI never appears inside the pane.
@@ -1094,7 +1205,7 @@ document.getElementById("preview-frame").addEventListener("load", function () {
   try {
     const loc = this.contentWindow.location;
     if (loc.href === "about:blank") return;
-    if (!loc.pathname.startsWith("/api/preview/")) {
+    if (!loc.pathname.startsWith("/api/preview/") && !loc.pathname.startsWith("/api/file/raw")) {
       // Navigation escaped the proxy (e.g. quarto sent a reload path without
       // the /api/preview/ prefix).  Fall back to the proxy root so we never
       // show the editor UI or a 404 inside the preview pane.
@@ -1299,6 +1410,7 @@ function applySettings() {
   document.getElementById("s-autoSaveDelay").value = settings.autoSaveDelay / 60000;
   document.getElementById("s-vimMode").checked = settings.vimMode;
   document.getElementById("s-commitMessage").value = settings.commitMessage ?? "User saved.";
+  document.getElementById("s-previewFollowDebounce").value = settings.previewFollowDebounce;
 
   document.body.className = settings.theme === "light" ? "light" : "";
   if (cmView) {
@@ -1316,6 +1428,7 @@ window.onSettingChange = () => {
     autoSaveDelay: Math.round(parseFloat(document.getElementById("s-autoSaveDelay").value) * 60000),
     vimMode: document.getElementById("s-vimMode").checked,
     commitMessage: document.getElementById("s-commitMessage").value || "User saved.",
+    previewFollowDebounce: parseInt(document.getElementById("s-previewFollowDebounce").value, 10),
   };
   applySettings();
   clearTimeout(settingsSaveTimer);
