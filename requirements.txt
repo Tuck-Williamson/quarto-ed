@@ -14,3 +14,4 @@ psutil
 cryptography
 # Jupyter for quarto Python chunk execution
 jupyter
+jupyter_server==2.20.0
