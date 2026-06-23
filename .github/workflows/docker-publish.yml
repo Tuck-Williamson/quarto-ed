@@ -99,6 +99,36 @@ jobs:
           docker push "$GHCR_IMAGE:sha-${SHORT_SHA}"
           docker push "$GHCR_IMAGE:v${APP_VERSION}"
 
+      # ── Push PR image with PR number tag (for Heroku review apps) ────────
+      - name: Log in to ghcr.io (PR builds)
+        if: github.event_name == 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push PR image to ghcr.io with PR tag
+        if: github.event_name == 'pull_request'
+        run: |
+          docker tag app:ci "$GHCR_IMAGE:pr-${{ github.event.number }}"
+          docker tag app:ci "$GHCR_IMAGE:sha-${SHORT_SHA}"
+          docker push "$GHCR_IMAGE:pr-${{ github.event.number }}"
+          docker push "$GHCR_IMAGE:sha-${SHORT_SHA}"
+
+      - name: Log in to Heroku registry (PR builds)
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "${{ secrets.HEROKU_API_KEY }}" | \
+            docker login registry.heroku.com --username=_ --password-stdin
+
+      - name: Push PR image to Heroku registry
+        if: github.event_name == 'pull_request'
+        id: heroku_pr_push
+        run: |
+          docker tag app:ci registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}
+          docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}
+
       # ── Deploy to Heroku ────────────────────────────────────────────────
       - name: Log in to Heroku registry
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
