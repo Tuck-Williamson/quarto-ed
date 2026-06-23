@@ -41,3 +41,7 @@ class CommitRequest(BaseModel):
 class AIChatRequest(BaseModel):
     message: str
     context: str | None = None
+
+
+class PreviewRestartRequest(BaseModel):
+    target: str | None = None

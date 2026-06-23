@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -12,7 +13,7 @@ import httpx
 import websockets
 import websockets.exceptions
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 
@@ -27,6 +28,7 @@ from .schemas import (
     FileCreateRequest,
     FileWriteRequest,
     GitignoreAddRequest,
+    PreviewRestartRequest,
     SettingsSaveRequest,
     SyncRequest,
     WorkspaceLoadRequest,
@@ -87,6 +89,7 @@ _SETTINGS_DEFAULTS = {
     "autoSaveDelay": 2000,
     "vimMode": False,
     "commitMessage": "User saved.",
+    "previewFollowDebounce": 1000,
 }
 
 # ── Preview process state ────────────────────────────────────────────────────
@@ -94,6 +97,9 @@ _SETTINGS_DEFAULTS = {
 _preview_processes: dict[int, asyncio.subprocess.Process] = {}
 _preview_ports: dict[int, int] = {}
 _preview_logs: dict[int, list[str]] = {}
+_preview_targets: dict[int, str | None] = {}
+_preview_paths: dict[int, str] = {}
+_preview_locks: dict[int, asyncio.Lock] = {}
 _LOG_MAX_LINES = 500
 
 
@@ -222,7 +228,33 @@ async def _wait_for_port(port: int, proc: asyncio.subprocess.Process, timeout: f
     )
 
 
-async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: int) -> int:
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_BROWSE_RE = re.compile(r"Browse at (https?://[^/\s]+)(/\S*)?")
+
+
+async def _capture_browse_path(user_id: int, proc: asyncio.subprocess.Process,
+                                timeout: float = 10.0) -> str:
+    """Read stdout lines until quarto prints 'Browse at <url>', returning the
+    path portion (e.g. '/' or '/sub/doc.html'). Falls back to '/' on timeout."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    buf = _preview_logs.setdefault(user_id, [])
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1)
+        except asyncio.TimeoutError:
+            continue
+        if not raw:
+            break
+        line = raw.decode(errors="replace").rstrip()
+        buf.append(line)
+        m = _BROWSE_RE.search(_ANSI_RE.sub("", line))
+        if m:
+            return m.group(2) or "/"
+    return "/"
+
+
+async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: int,
+                                target: str | None = None) -> int:
     port = _allocate_port()
 
     uid, gid = sandbox.ensure_user_account(user_id)
@@ -235,9 +267,10 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
     python_bin = await _ensure_quarto_venv(workspace_path, user_id, base_env)
     env = _quarto_env(user_id, python_bin)
 
+    preview_arg = _safe_path(workspace_path, target) if target else workspace_path
     process = await asyncio.create_subprocess_exec(
         *sandbox.setpriv_args(user_id),
-        "quarto", "preview", workspace_path,
+        "quarto", "preview", preview_arg,
         "--port", str(port),
         "--host", "127.0.0.1",
         "--no-browser",
@@ -253,9 +286,11 @@ async def spawn_quarto_preview(user_id: int, workspace_path: str, session_id: in
     await _wait_for_port(port, process)
 
     _preview_logs[user_id] = []
+    _preview_paths[user_id] = await _capture_browse_path(user_id, process)
     asyncio.ensure_future(_pipe_reader(user_id, process.stdout))
     asyncio.ensure_future(_pipe_reader(user_id, process.stderr))
 
+    _preview_targets[user_id] = target
     async with get_db_session() as db:
         await db.execute(
             update(Session)
@@ -271,6 +306,7 @@ async def kill_quarto_preview(user_id: int):
     proc = _preview_processes.pop(user_id, None)
     _preview_ports.pop(user_id, None)
     _preview_logs.pop(user_id, None)
+    _preview_paths.pop(user_id, None)
     if proc and proc.returncode is None:
         proc.terminate()
         try:
@@ -291,7 +327,9 @@ async def _get_or_spawn_preview(user_id: int, sess: Session) -> int:
     _preview_ports.pop(user_id, None)
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
-    return await spawn_quarto_preview(user_id, sess.workspace_path, sess.id)
+    async with _preview_locks.setdefault(user_id, asyncio.Lock()):
+        return await spawn_quarto_preview(user_id, sess.workspace_path, sess.id,
+                                            target=_preview_targets.get(user_id))
 
 
 # ── Path safety ───────────────────────────────────────────────────────────────
@@ -681,6 +719,20 @@ async def read_file(request: Request, path: str = Query(...)):
     return {"path": path, "content": content}
 
 
+@router.get("/api/file/raw")
+async def read_file_raw(request: Request, path: str = Query(...)):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+    full_path = _safe_path(sess.workspace_path, path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = mimetypes.guess_type(full_path)[0] or "application/octet-stream"
+    return FileResponse(full_path, media_type=media_type)
+
+
 @router.post("/api/file")
 async def write_file(request: Request, body: FileWriteRequest):
     sess = await get_current_session(request)
@@ -968,15 +1020,21 @@ async def get_preview_logs(request: Request):
 
 
 @router.post("/api/preview/restart")
-async def restart_preview(request: Request):
+async def restart_preview(request: Request, body: PreviewRestartRequest):
     sess = await get_current_session(request)
     if not sess:
         raise HTTPException(status_code=401)
     if not sess.workspace_path:
         raise HTTPException(status_code=400, detail="No workspace loaded. Load a repo first.")
-    await kill_quarto_preview(sess.user_id)
-    port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id)
-    return {"status": "ok", "port": port}
+    target = body.target
+    if target:
+        full = _safe_path(sess.workspace_path, target)
+        if not target.endswith(".qmd") or not os.path.isfile(full):
+            raise HTTPException(status_code=400, detail="Invalid preview target")
+    async with _preview_locks.setdefault(sess.user_id, asyncio.Lock()):
+        await kill_quarto_preview(sess.user_id)
+        port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id, target=target)
+    return {"status": "ok", "port": port, "path": _preview_paths.get(sess.user_id, "/")}
 
 
 # ── Preview proxy (HTTP + WS) ─────────────────────────────────────────────────
