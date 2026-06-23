@@ -1,0 +1,120 @@
+name: Deploy to Heroku Review App
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  HEROKU_APP_NAME_PREFIX: quarto-ed-pr
+
+jobs:
+  deploy-review-app:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set review app name
+        run: |
+          echo "REVIEW_APP_NAME=${{ env.HEROKU_APP_NAME_PREFIX }}-${{ github.event.number }}" >> $GITHUB_ENV
+
+      - name: Log in to Heroku CLI
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku auth:token > ~/.netrc || echo "auth.heroku.com login _ password ${HEROKU_API_KEY}" >> ~/.netrc
+
+      - name: Create or update Heroku review app
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          # Check if review app already exists
+          if heroku apps --json | grep -q "\"name\":\"${{ env.REVIEW_APP_NAME }}\""; then
+            echo "Review app ${{ env.REVIEW_APP_NAME }} already exists"
+          else
+            echo "Creating review app ${{ env.REVIEW_APP_NAME }}"
+            # Create from pipeline
+            heroku create "${{ env.REVIEW_APP_NAME }}" \
+              --region=us \
+              --addons=heroku-postgresql:essential-0
+
+            # Attach to pipeline
+            heroku pipeline:connect quarto-ed "${{ env.REVIEW_APP_NAME }}"
+          fi
+
+      - name: Log in to Heroku Docker registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+
+      - name: Deploy PR image to review app
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          # Pull the PR-tagged image (wait up to 30s for it to be available)
+          for i in {1..6}; do
+            if docker pull "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}"; then
+              break
+            fi
+            if [ $i -lt 6 ]; then
+              echo "Image not ready yet, waiting..."
+              sleep 5
+            else
+              echo "Timeout waiting for image to be pushed"
+              exit 1
+            fi
+          done
+
+          # Get image ID from pulled image
+          IMAGE_ID=$(docker inspect "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}" --format='{{.Id}}')
+
+          # Deploy to review app
+          curl -X PATCH \
+            "https://api.heroku.com/apps/${{ env.REVIEW_APP_NAME }}/formation" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
+            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
+            -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"$IMAGE_ID\"}]}"
+
+      - name: Set review app config vars
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          # Set required environment variables for review app
+          heroku config:set \
+            -a "${{ env.REVIEW_APP_NAME }}" \
+            GITHUB_CLIENT_ID="${{ secrets.HEROKU_REVIEW_APP_GITHUB_CLIENT_ID }}" \
+            GITHUB_CLIENT_SECRET="${{ secrets.HEROKU_REVIEW_APP_GITHUB_CLIENT_SECRET }}" \
+            TOKEN_ENCRYPTION_KEY="${{ secrets.HEROKU_REVIEW_APP_TOKEN_ENCRYPTION_KEY }}" \
+            ALLOWED_GITHUB_USERS="${{ secrets.HEROKU_REVIEW_APP_ALLOWED_USERS }}" || true
+
+      - name: Get review app URL
+        id: review_app
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          APP_URL=$(heroku apps:info "${{ env.REVIEW_APP_NAME }}" --json | grep -o '"web_url":"[^"]*' | cut -d'"' -f4)
+          echo "url=$APP_URL" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with review app link
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 Review app deployed!\n\nYour Heroku review app is now live: [${{ env.REVIEW_APP_NAME }}](${{ steps.review_app.outputs.url }})\n\n**Note:** It may take a minute to start up. If you see an error, check the [Heroku logs](https://dashboard.heroku.com/apps/${{ env.REVIEW_APP_NAME }}/logs).`
+            })
+
+      - name: Delete review app on PR close
+        if: github.event.action == 'closed'
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku apps:destroy "${{ env.REVIEW_APP_NAME }}" --confirm "${{ env.REVIEW_APP_NAME }}" || true
