@@ -118,8 +118,10 @@ jobs:
 
       - name: Log in to Heroku registry (PR builds)
         if: github.event_name == 'pull_request'
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          echo "${{ secrets.HEROKU_API_KEY }}" | \
+          echo "$HEROKU_API_KEY" | \
             docker login registry.heroku.com --username=_ --password-stdin
 
       - name: Push PR image to Heroku registry

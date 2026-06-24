@@ -1,63 +1,86 @@
 name: Deploy to Heroku Review App
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: ["Build, Test, and Deploy"]
+    types: [completed]
 
 env:
   HEROKU_APP_NAME_PREFIX: quarto-ed-pr
 
 jobs:
   deploy-review-app:
+    # Only deploy review apps for pull requests, not direct pushes to main
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set review app name
+      - name: Get PR number from workflow run
+        id: pr_info
         run: |
-          echo "REVIEW_APP_NAME=${{ env.HEROKU_APP_NAME_PREFIX }}-${{ github.event.number }}" >> $GITHUB_ENV
+          # Extract PR number from workflow_run payload
+          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_commit.id }}/pulls --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -z "$PR_NUMBER" ]; then
+            # Fallback: try to get from workflow_run directly
+            PR_NUMBER=$(jq -r '.pull_requests[0].number // empty' <<< '${{ toJson(github.event.workflow_run) }}')
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "REVIEW_APP_NAME=${{ env.HEROKU_APP_NAME_PREFIX }}-$PR_NUMBER" >> $GITHUB_ENV
+
+      - name: Fail if not a PR
+        if: steps.pr_info.outputs.PR_NUMBER == ''
+        run: |
+          echo "ERROR: Could not determine PR number - skipping review app deployment"
+          exit 1
 
       - name: Log in to Heroku CLI
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           heroku auth:token > ~/.netrc || echo "auth.heroku.com login _ password ${HEROKU_API_KEY}" >> ~/.netrc
 
       - name: Create or update Heroku review app
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
+          REVIEW_APP_NAME="${{ env.HEROKU_APP_NAME_PREFIX }}-${{ steps.pr_info.outputs.PR_NUMBER }}"
+
           # Check if review app already exists
-          if heroku apps --json | grep -q "\"name\":\"${{ env.REVIEW_APP_NAME }}\""; then
-            echo "Review app ${{ env.REVIEW_APP_NAME }} already exists"
+          if heroku apps --json | grep -q "\"name\":\"$REVIEW_APP_NAME\""; then
+            echo "Review app $REVIEW_APP_NAME already exists"
           else
-            echo "Creating review app ${{ env.REVIEW_APP_NAME }}"
+            echo "Creating review app $REVIEW_APP_NAME"
             # Create from pipeline
-            heroku create "${{ env.REVIEW_APP_NAME }}" \
+            heroku create "$REVIEW_APP_NAME" \
               --region=us \
               --addons=heroku-postgresql:essential-0
 
-            # Attach to pipeline
-            heroku pipeline:connect quarto-ed "${{ env.REVIEW_APP_NAME }}"
+            # Attach to pipeline (optional - may fail if not a team app)
+            heroku pipeline:connect quarto-ed "$REVIEW_APP_NAME" || true
           fi
 
       - name: Log in to Heroku Docker registry
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
 
       - name: Deploy PR image to review app
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.PR_NUMBER }}
         run: |
+          REVIEW_APP_NAME="${{ env.HEROKU_APP_NAME_PREFIX }}-$PR_NUMBER"
+
           # Pull the PR-tagged image (wait up to 30s for it to be available)
           for i in {1..6}; do
-            if docker pull "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}"; then
+            if docker pull "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-$PR_NUMBER"; then
               break
             fi
             if [ $i -lt 6 ]; then
@@ -70,51 +93,66 @@ jobs:
           done
 
           # Get image ID from pulled image
-          IMAGE_ID=$(docker inspect "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-${{ github.event.number }}" --format='{{.Id}}')
+          IMAGE_ID=$(docker inspect "registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web:pr-$PR_NUMBER" --format='{{.Id}}')
 
           # Deploy to review app
           curl -X PATCH \
-            "https://api.heroku.com/apps/${{ env.REVIEW_APP_NAME }}/formation" \
+            "https://api.heroku.com/apps/$REVIEW_APP_NAME/formation" \
             -H "Content-Type: application/json" \
             -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
             -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
             -d "{\"updates\":[{\"type\":\"web\",\"docker_image\":\"$IMAGE_ID\"}]}"
 
       - name: Set review app config vars
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.PR_NUMBER }}
         run: |
+          REVIEW_APP_NAME="${{ env.HEROKU_APP_NAME_PREFIX }}-$PR_NUMBER"
+
           # Set required environment variables for review app
           heroku config:set \
-            -a "${{ env.REVIEW_APP_NAME }}" \
+            -a "$REVIEW_APP_NAME" \
             GITHUB_CLIENT_ID="${{ secrets.HEROKU_REVIEW_APP_GITHUB_CLIENT_ID }}" \
             GITHUB_CLIENT_SECRET="${{ secrets.HEROKU_REVIEW_APP_GITHUB_CLIENT_SECRET }}" \
             TOKEN_ENCRYPTION_KEY="${{ secrets.HEROKU_REVIEW_APP_TOKEN_ENCRYPTION_KEY }}" \
             ALLOWED_GITHUB_USERS="${{ secrets.HEROKU_REVIEW_APP_ALLOWED_USERS }}" || true
 
       - name: Get review app URL
+        if: steps.pr_info.outputs.PR_NUMBER != ''
         id: review_app
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.PR_NUMBER }}
         run: |
-          APP_URL=$(heroku apps:info "${{ env.REVIEW_APP_NAME }}" --json | grep -o '"web_url":"[^"]*' | cut -d'"' -f4)
+          REVIEW_APP_NAME="${{ env.HEROKU_APP_NAME_PREFIX }}-$PR_NUMBER"
+          APP_URL=$(heroku apps:info "$REVIEW_APP_NAME" --json | grep -o '"web_url":"[^"]*' | cut -d'"' -f4)
           echo "url=$APP_URL" >> $GITHUB_OUTPUT
+          echo "review_app_name=$REVIEW_APP_NAME" >> $GITHUB_OUTPUT
 
       - name: Comment PR with review app link
-        if: success()
+        if: steps.pr_info.outputs.PR_NUMBER != '' && success()
         uses: actions/github-script@v7
+        env:
+          REVIEW_APP_URL: ${{ steps.review_app.outputs.url }}
+          REVIEW_APP_NAME: ${{ steps.review_app.outputs.review_app_name }}
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            const { REVIEW_APP_URL, REVIEW_APP_NAME } = process.env;
+            // Get PR number from workflow_run
+            const prs = ${{ toJson(github.event.workflow_run.pull_requests) }};
+            if (prs.length === 0) {
+              console.log("No PR found, skipping comment");
+              return;
+            }
+            const prNumber = prs[0].number;
+
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `🚀 Review app deployed!\n\nYour Heroku review app is now live: [${{ env.REVIEW_APP_NAME }}](${{ steps.review_app.outputs.url }})\n\n**Note:** It may take a minute to start up. If you see an error, check the [Heroku logs](https://dashboard.heroku.com/apps/${{ env.REVIEW_APP_NAME }}/logs).`
-            })
-
-      - name: Delete review app on PR close
-        if: github.event.action == 'closed'
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          heroku apps:destroy "${{ env.REVIEW_APP_NAME }}" --confirm "${{ env.REVIEW_APP_NAME }}" || true
+              body: `🚀 Review app deployed!\n\nYour Heroku review app is now live: [${REVIEW_APP_NAME}](${REVIEW_APP_URL})\n\n**Note:** It may take a minute to start up. If you see an error, check the [Heroku logs](https://dashboard.heroku.com/apps/${REVIEW_APP_NAME}/logs).`
+            });
+          allowEmptyNoop: true
