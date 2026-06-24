@@ -6,14 +6,14 @@
   <title>quarto-ed</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           fontFamily: {
-            sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
+            sans: ['"Rubik"', 'system-ui', 'sans-serif'],
             mono: ['"JetBrains Mono"', 'Consolas', 'monospace'],
           }
         }
@@ -25,20 +25,20 @@
 
     /* ── CSS variables — referenced by JS and CodeMirror ── */
     :root {
-      --bg: #07090e; --bg2: #0d1117; --bg3: #141b24;
-      --border: #1e2735; --text: #dce5f0; --text2: #4d6278;
-      --accent: #38bdf8; --green: #34d399; --red: #f87171;
-      --yellow: #fbbf24; --purple: #a78bfa;
+      --bg: #0b0a09; --bg2: #131110; --bg3: #1c1917;
+      --border: #2a2420; --text: #ede8e2; --text2: #6b5f57;
+      --accent: #e8974a; --green: #4ade80; --red: #f87171;
+      --yellow: #fbbf24; --purple: #c084fc;
     }
     body.light {
-      --bg: #f8fafc; --bg2: #f0f4f8; --bg3: #e4eaf2;
-      --border: #c8d5e0; --text: #0f172a; --text2: #64748b;
-      --accent: #0284c7; --green: #059669; --red: #dc2626;
+      --bg: #faf9f7; --bg2: #f2ede8; --bg3: #e8e0d8;
+      --border: #d0c8be; --text: #1c1410; --text2: #7a6a5e;
+      --accent: #c4712a; --green: #16a34a; --red: #dc2626;
       --yellow: #d97706; --purple: #7c3aed;
     }
 
     body {
-      font-family: "DM Sans", system-ui, sans-serif;
+      font-family: "Rubik", system-ui, sans-serif;
       background: var(--bg); color: var(--text);
       display: flex; flex-direction: column; height: 100vh; overflow: hidden;
       -webkit-font-smoothing: antialiased; font-size: 14px;
@@ -56,7 +56,7 @@
 
     /* ── Buttons ── */
     .btn {
-      font-size: 0.74rem; font-weight: 600; padding: 0.28rem 0.65rem;
+      font-size: 0.74rem; font-weight: 500; padding: 0.28rem 0.65rem;
       border-radius: 6px; border: 1px solid var(--border); cursor: pointer;
       background: var(--bg3); color: var(--text); display: inline-flex;
       align-items: center; gap: 0.3rem; text-decoration: none; white-space: nowrap;
@@ -65,19 +65,19 @@
     }
     .btn:hover { background: var(--border); }
     .btn-green {
-      background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.35);
+      background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.3);
       color: var(--green);
     }
-    .btn-green:hover { background: rgba(52,211,153,0.18); border-color: var(--green); }
+    .btn-green:hover { background: rgba(74,222,128,0.16); border-color: var(--green); }
     .btn-red {
-      background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.35);
+      background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.3);
       color: var(--red);
     }
-    .btn-red:hover { background: rgba(248,113,113,0.18); border-color: var(--red); }
+    .btn-red:hover { background: rgba(248,113,113,0.16); border-color: var(--red); }
     .btn-ghost { background: transparent; border-color: transparent; }
     .btn-ghost:hover { background: var(--bg3); }
     .btn-ghost.btn-red { color: var(--red); background: transparent; border-color: transparent; }
-    .btn-ghost.btn-red:hover { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); }
+    .btn-ghost.btn-red:hover { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); }
 
     /* ── Top bar ── */
     .topbar {
@@ -96,7 +96,7 @@
       font-family: "JetBrains Mono", monospace; padding: 0.18rem 0.45rem;
       background: var(--bg3); border: 1px solid var(--border); border-radius: 5px;
     }
-    .topbar a.repo-label:hover { color: var(--accent); border-color: rgba(56,189,248,0.3); }
+    .topbar a.repo-label:hover { color: var(--accent); border-color: rgba(232,151,74,0.35); }
     .topbar .spacer { flex: 1; }
     #save-indicator {
       font-size: 0.7rem; color: var(--green); opacity: 0; transition: opacity 0.5s;
@@ -114,18 +114,14 @@
       display: none; position: absolute; top: calc(100% + 6px); left: 0;
       background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
       min-width: 170px; z-index: 50; padding: 0.3rem;
-      box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02);
       max-height: calc(100vh - 60px); overflow-y: auto;
     }
     .dropdown.open { display: block; }
-    .dropdown.wide { min-width: 290px; }
+    .dropdown.wide { min-width: 260px; }
     .dropdown-label {
       font-size: 0.63rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
       color: var(--text2); padding: 0.35rem 0.6rem 0.2rem;
-    }
-    .dropdown-sublabel {
-      font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
-      color: var(--text2); padding: 0.35rem 0.6rem 0.15rem;
     }
     .dropdown-divider { border-top: 1px solid var(--border); margin: 0.3rem 0; }
     .dropdown-item {
@@ -137,11 +133,35 @@
     .dropdown-item:hover { background: var(--bg3); }
     .dropdown-item .shortcut {
       margin-left: auto; padding-left: 1rem; color: var(--text2);
-      font-size: 0.67rem; white-space: nowrap;
+      font-size: 0.66rem; white-space: nowrap;
       font-family: "JetBrains Mono", monospace;
     }
     .dropdown-check { width: 1em; flex-shrink: 0; opacity: 0; color: var(--accent); }
     .dropdown-check.visible { opacity: 1; }
+
+    /* ── Tree menu (Edit command groups) ── */
+    .menu-tree-group { margin: 1px 0; }
+    .menu-tree-header { font-weight: 500; color: var(--text); }
+    .menu-tree-arrow {
+      font-size: 0.58rem; color: var(--text2); width: 12px; flex-shrink: 0;
+      display: inline-block; text-align: center; line-height: 1;
+      transition: color 0.1s;
+    }
+    .menu-tree-header:hover .menu-tree-arrow { color: var(--accent); }
+    .menu-tree-children {
+      overflow: hidden; max-height: 0;
+      transition: max-height 0.2s ease;
+      padding-left: 0;
+      margin-left: 1.55rem;
+      position: relative;
+    }
+    .menu-tree-children::before {
+      content: ''; position: absolute; left: -0.65rem; top: 2px; bottom: 4px;
+      width: 1px; background: var(--border);
+    }
+    .menu-tree-children.open { max-height: 600px; }
+    .menu-tree-leaf { font-size: 0.77rem; color: var(--text2); padding-left: 0.4rem; }
+    .menu-tree-leaf:hover { color: var(--text); }
 
     /* ── Resize handles ── */
     .resize-handle {
@@ -173,7 +193,7 @@
       transition: background 0.08s;
     }
     .tree-item:hover { background: var(--bg3); }
-    .tree-item.active { background: rgba(56,189,248,0.08); color: var(--accent); }
+    .tree-item.active { background: rgba(232,151,74,0.1); color: var(--accent); }
     .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.68rem; }
     .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tree-item .ignored {
@@ -190,7 +210,7 @@
     /* ── Editor area ── */
     .editor-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
-    /* ── Tabs ── */
+    /* ── Editor tabs ── */
     .tabs-bar {
       display: flex; align-items: stretch; overflow-x: auto;
       background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -234,19 +254,26 @@
       display: flex; flex-direction: column; overflow: hidden;
     }
     .right-panel.collapsed { width: 0 !important; min-width: 0 !important; overflow: hidden; border-left: none; }
-    .panel-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .panel-tab {
-      flex: 1; padding: 0.4rem; font-size: 0.67rem; font-weight: 700;
-      text-align: center; cursor: pointer; color: var(--text2);
-      border: none; background: none; font-family: inherit;
-      text-transform: uppercase; letter-spacing: 0.07em;
-      transition: color 0.1s, background 0.1s; position: relative;
+
+    /* ── Panel tabs — card/browser-tab style ── */
+    .panel-tabs {
+      display: flex; align-items: flex-end;
+      background: var(--bg); border-bottom: 1px solid var(--border);
+      padding: 6px 8px 0; gap: 3px; flex-shrink: 0;
     }
-    .panel-tab:hover { background: var(--bg3); color: var(--text); }
-    .panel-tab.active { color: var(--accent); }
-    .panel-tab.active::after {
-      content: ''; position: absolute; bottom: 0; left: 15%; right: 15%;
-      height: 2px; background: var(--accent); border-radius: 1px 1px 0 0;
+    .panel-tab {
+      padding: 0.3rem 0.9rem; font-size: 0.68rem; font-weight: 600;
+      cursor: pointer; color: var(--text2); font-family: inherit;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0;
+      background: transparent;
+      transition: color 0.12s, background 0.12s, border-color 0.12s;
+      position: relative; bottom: -1px;
+    }
+    .panel-tab:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+    .panel-tab.active {
+      background: var(--bg2); color: var(--text);
+      border-color: var(--border); border-bottom-color: var(--bg2);
     }
     .panel-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
     .panel-pane { flex: 1; display: none; flex-direction: column; overflow: hidden; }
@@ -306,7 +333,7 @@
       resize: none; font-family: inherit; line-height: 1.5;
       transition: border-color 0.15s;
     }
-    .ai-input-bar textarea:focus { outline: none; border-color: rgba(56,189,248,0.5); }
+    .ai-input-bar textarea:focus { outline: none; border-color: rgba(232,151,74,0.5); }
     .ai-input-row { display: flex; align-items: center; gap: 0.4rem; }
     .ai-context-check {
       font-size: 0.7rem; color: var(--text2); display: flex;
@@ -330,7 +357,7 @@
       background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
       color: var(--text); padding: 0.22rem 0.45rem; font-size: 0.76rem; font-family: inherit;
     }
-    .settings-row select:focus, .settings-row input:focus { outline: none; border-color: rgba(56,189,248,0.5); }
+    .settings-row select:focus, .settings-row input:focus { outline: none; border-color: rgba(232,151,74,0.5); }
     .settings-row input[type=range] { width: 90px; accent-color: var(--accent); }
     .settings-row input[type=number] { width: 64px; }
     .snippets-editor { margin-top: 0.4rem; }
@@ -363,14 +390,14 @@
       left: 3px; top: 3px; background: var(--text2); border-radius: 50%;
       transition: transform 0.2s, background 0.2s;
     }
-    .toggle input:checked + .toggle-slider { background: rgba(56,189,248,0.15); border-color: rgba(56,189,248,0.5); }
+    .toggle input:checked + .toggle-slider { background: rgba(232,151,74,0.15); border-color: rgba(232,151,74,0.5); }
     .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--accent); }
 
     /* ── Dialogs ── */
     dialog {
       background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
       color: var(--text); padding: 1.5rem; min-width: 360px; max-width: 90vw;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
     }
     dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(3px); }
     dialog h3 { margin-bottom: 1rem; font-size: 0.95rem; font-weight: 600; }
@@ -385,7 +412,7 @@
       border-radius: 6px; color: var(--text); padding: 0.4rem 0.65rem;
       font-size: 0.82rem; font-family: inherit; transition: border-color 0.15s;
     }
-    dialog .field input[type=text]:focus { outline: none; border-color: rgba(56,189,248,0.5); }
+    dialog .field input[type=text]:focus { outline: none; border-color: rgba(232,151,74,0.5); }
     dialog datalist option { background: var(--bg2); }
     dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 
@@ -406,7 +433,7 @@
       border-radius: 5px; color: var(--text); padding: 0.25rem 0.45rem;
       font-size: 0.77rem; font-family: inherit; transition: border-color 0.15s;
     }
-    .settings-section input[type=text]:focus { outline: none; border-color: rgba(56,189,248,0.5); }
+    .settings-section input[type=text]:focus { outline: none; border-color: rgba(232,151,74,0.5); }
   </style>
 </head>
 <body class="{{ 'dark' if True else 'light' }}">
@@ -1144,25 +1171,36 @@ const _editCommandMap = {};
 function renderEditMenu() {
   const container = document.getElementById("editMenuItems");
   let idx = 0;
-  EDIT_COMMAND_GROUPS.forEach((group, gi) => {
-    if (gi > 0) {
-      const div = document.createElement("div");
-      div.className = "dropdown-divider";
-      container.appendChild(div);
-    }
-    const label = document.createElement("div");
-    label.className = "dropdown-sublabel";
-    label.textContent = group.label;
-    container.appendChild(label);
+  EDIT_COMMAND_GROUPS.forEach((group) => {
+    const groupEl = document.createElement("div");
+    groupEl.className = "menu-tree-group";
+
+    const header = document.createElement("button");
+    header.className = "dropdown-item menu-tree-header";
+    header.innerHTML = `<span class="menu-tree-arrow">▸</span><span>${group.label}</span>`;
+
+    const children = document.createElement("div");
+    children.className = "menu-tree-children";
+
     group.items.forEach(item => {
       const id = "ec" + (idx++);
       _editCommandMap[id] = item.cmd;
       const btn = document.createElement("button");
-      btn.className = "dropdown-item";
+      btn.className = "dropdown-item menu-tree-leaf";
       btn.innerHTML = `<span>${item.label}</span><span class="shortcut">${fmtKey(item)}</span>`;
       btn.addEventListener("click", () => runEditorCommand(id));
-      container.appendChild(btn);
+      children.appendChild(btn);
     });
+
+    header.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isOpen = children.classList.toggle("open");
+      header.querySelector(".menu-tree-arrow").textContent = isOpen ? "▾" : "▸";
+    });
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(children);
+    container.appendChild(groupEl);
   });
 }
 
