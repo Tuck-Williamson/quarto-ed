@@ -456,12 +456,19 @@
 
     /* ── Issues dialog ── */
     .issue-item {
-      display: flex; gap: 0.5rem; padding: 0.35rem 0.5rem;
-      background: var(--bg3); border-radius: 5px; font-size: 0.74rem;
-      border-left: 2px solid var(--yellow); align-items: flex-start;
+      background: var(--bg3); border-radius: 5px;
+      border-left: 2px solid var(--yellow); overflow: hidden;
     }
-    .issue-time { color: var(--text2); font-family: "JetBrains Mono", monospace; white-space: nowrap; font-size: 0.67rem; padding-top: 1px; }
-    .issue-msg { color: var(--text); flex: 1; word-break: break-word; line-height: 1.5; }
+    .issue-header {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border);
+    }
+    .issue-time { color: var(--text2); font-family: "JetBrains Mono", monospace; font-size: 0.67rem; }
+    .issue-msg {
+      padding: 0.4rem 0.6rem; font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem; line-height: 1.6; color: var(--text);
+      white-space: pre-wrap; word-break: break-all; overflow-x: auto;
+    }
   </style>
 </head>
 <body class="{{ 'dark' if True else 'light' }}">
@@ -736,9 +743,9 @@
 </dialog>
 
 <!-- Issues dialog -->
-<dialog id="issuesDialog" style="min-width:460px">
+<dialog id="issuesDialog" style="min-width:580px;max-width:90vw">
   <h3>Issues</h3>
-  <div id="issues-list" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:0.4rem;margin:0.75rem 0"></div>
+  <div id="issues-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:0.5rem;margin:0.75rem 0"></div>
   <div class="actions">
     <button class="btn btn-red" onclick="clearIssues()">Clear all</button>
     <button class="btn" onclick="document.getElementById('issuesDialog').close()">Close</button>
@@ -1734,7 +1741,10 @@ function reportIssue(msg) {
 window.showIssuesDialog = () => {
   const list = document.getElementById("issues-list");
   list.innerHTML = _issues.map(i =>
-    `<div class="issue-item"><span class="issue-time">${escapeHtml(i.time)}</span><span class="issue-msg">${escapeHtml(i.msg)}</span></div>`
+    `<div class="issue-item">` +
+    `<div class="issue-header"><span class="issue-time">${escapeHtml(i.time)}</span></div>` +
+    `<div class="issue-msg">${_ansiUp.ansi_to_html(i.msg)}</div>` +
+    `</div>`
   ).join("");
   document.getElementById("issuesDialog").showModal();
 };
