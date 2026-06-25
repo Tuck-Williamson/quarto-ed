@@ -1031,9 +1031,12 @@ async def restart_preview(request: Request, body: PreviewRestartRequest):
         full = _safe_path(sess.workspace_path, target)
         if not target.endswith(".qmd") or not os.path.isfile(full):
             raise HTTPException(status_code=400, detail="Invalid preview target")
-    async with _preview_locks.setdefault(sess.user_id, asyncio.Lock()):
-        await kill_quarto_preview(sess.user_id)
-        port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id, target=target)
+    try:
+        async with _preview_locks.setdefault(sess.user_id, asyncio.Lock()):
+            await kill_quarto_preview(sess.user_id)
+            port = await spawn_quarto_preview(sess.user_id, sess.workspace_path, sess.id, target=target)
+    except (RuntimeError, TimeoutError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "ok", "port": port, "path": _preview_paths.get(sess.user_id, "/")}
 
 
