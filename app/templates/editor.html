@@ -251,9 +251,65 @@
     #cm-host { flex: 1; overflow: hidden; }
     #cm-host .cm-editor { height: 100%; }
     #cm-host .cm-scroller { overflow: auto; }
-    .no-file-msg {
-      flex: 1; display: flex; align-items: center; justify-content: center;
-      color: var(--text2); font-size: 0.83rem; flex-direction: column; gap: 0.5rem;
+
+    /* ── Welcome pane ── */
+    .welcome-pane { flex: 1; overflow-y: auto; background: var(--bg); }
+    .welcome-scroll {
+      max-width: 680px; width: 100%; padding: 2.5rem 2rem 3rem; margin: 0 auto;
+    }
+    .welcome-logo {
+      font-family: "JetBrains Mono", monospace; font-weight: 700;
+      font-size: 1.5rem; color: var(--text); letter-spacing: -0.03em; line-height: 1;
+    }
+    .welcome-logo span { color: var(--accent); }
+    .welcome-tagline { color: var(--text2); font-size: 0.82rem; margin-top: 0.35rem; }
+    .welcome-section { margin-top: 1.75rem; }
+    .welcome-section h3 {
+      font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--accent); margin-bottom: 0.75rem;
+      padding-bottom: 0.35rem; border-bottom: 1px solid var(--border);
+    }
+    .welcome-p { font-size: 0.81rem; color: var(--text2); line-height: 1.7; margin-bottom: 0.5rem; }
+    .welcome-step {
+      display: flex; align-items: flex-start; gap: 0.75rem;
+      margin-bottom: 0.55rem; font-size: 0.81rem; color: var(--text); line-height: 1.55;
+    }
+    .welcome-step-n {
+      width: 20px; height: 20px; flex-shrink: 0;
+      background: var(--accent); color: #0e0c0b;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 0.63rem; font-weight: 700; margin-top: 1px;
+    }
+    .welcome-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.6rem; margin-bottom: 0.75rem; }
+    .welcome-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.7rem 0.8rem;
+    }
+    .welcome-card-title { font-size: 0.76rem; font-weight: 600; color: var(--text); margin-bottom: 0.25rem; }
+    .welcome-card-body { font-size: 0.73rem; color: var(--text2); line-height: 1.55; }
+    .welcome-table { width: 100%; border-collapse: collapse; font-size: 0.79rem; }
+    .welcome-table tr { border-bottom: 1px solid var(--border); }
+    .welcome-table tr:last-child { border-bottom: none; }
+    .welcome-table td { padding: 0.32rem 0.4rem; vertical-align: top; line-height: 1.55; color: var(--text2); }
+    .welcome-table td:first-child {
+      white-space: nowrap; color: var(--text); width: 1%; padding-right: 1.25rem;
+      font-family: "JetBrains Mono", monospace; font-size: 0.74rem;
+    }
+    .welcome-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.5rem 0; }
+    .welcome-chip {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.12rem 0.45rem; font-size: 0.7rem; font-family: "JetBrains Mono", monospace;
+      color: var(--accent);
+    }
+    .welcome-warn {
+      background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.25);
+      border-radius: 6px; padding: 0.5rem 0.75rem;
+      font-size: 0.77rem; color: var(--yellow); line-height: 1.55; margin-top: 0.5rem;
+    }
+    kbd {
+      background: var(--bg3); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.08em 0.38em; font-family: "JetBrains Mono", monospace; font-size: 0.82em;
+      color: var(--text); display: inline-block; line-height: 1.4; white-space: nowrap;
     }
 
     /* ── Right panel ── */
@@ -547,12 +603,137 @@
   <div class="editor-area">
     <div class="tabs-bar" id="tabs-bar"></div>
     <div id="cm-host"></div>
-    {% if not has_workspace %}
-    <div class="no-file-msg" id="no-file-msg">
-      <span style="font-size:2rem;opacity:0.3">📄</span>
-      <span>Load a repo, then open a file from the sidebar</span>
+
+    <!-- Welcome / empty-state README -->
+    <div class="welcome-pane" id="welcome-pane">
+      <div class="welcome-scroll">
+
+        <div class="welcome-logo">quarto<span>-</span>ed</div>
+        <div class="welcome-tagline">A browser-based editor for Quarto documents</div>
+
+        <!-- Getting started -->
+        <div class="welcome-section">
+          <h3>Getting started</h3>
+          {% if not has_workspace %}
+          <div class="welcome-step">
+            <span class="welcome-step-n">1</span>
+            <span>Click <kbd>⊞ Load repo</kbd> in the top bar to clone a GitHub repository into your workspace.</span>
+          </div>
+          <div class="welcome-step">
+            <span class="welcome-step-n">2</span>
+            <span>Open a <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">.qmd</code> file from the <strong>Files</strong> panel on the left.</span>
+          </div>
+          <div class="welcome-step">
+            <span class="welcome-step-n">3</span>
+            <span>Click <kbd>▶ Start preview</kbd> in the Preview tab to launch a live quarto preview.</span>
+          </div>
+          {% else %}
+          <div class="welcome-step">
+            <span class="welcome-step-n">1</span>
+            <span>Open a <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">.qmd</code> file from the <strong>Files</strong> panel on the left.</span>
+          </div>
+          <div class="welcome-step">
+            <span class="welcome-step-n">2</span>
+            <span>Click <kbd>▶ Start preview</kbd> in the Preview tab to launch a live quarto preview.</span>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Layout -->
+        <div class="welcome-section">
+          <h3>Layout</h3>
+          <div class="welcome-grid">
+            <div class="welcome-card">
+              <div class="welcome-card-title">Files</div>
+              <div class="welcome-card-body">Left sidebar — browse and open files in the workspace. Right-click for delete and .gitignore options.</div>
+            </div>
+            <div class="welcome-card">
+              <div class="welcome-card-title">Editor</div>
+              <div class="welcome-card-body">Center pane — CodeMirror 6 editor with tabs, dirty indicator (●), and CTRL+S to save &amp; push.</div>
+            </div>
+            <div class="welcome-card">
+              <div class="welcome-card-title">Panels</div>
+              <div class="welcome-card-body">Right pane — switchable Preview, AI chat, Logs, and Settings tabs.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preview -->
+        <div class="welcome-section">
+          <h3>Preview</h3>
+          <p class="welcome-p">Click <kbd>▶ Start preview</kbd> to start a quarto process in the background. The iframe auto-reloads whenever you save. The status bar at the bottom shows the current preview state.</p>
+          <table class="welcome-table">
+            <tr><td>Project</td><td>Renders the whole project via <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">_quarto.yml</code>.</td></tr>
+            <tr><td>Follow active file</td><td>Tracks whichever <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">.qmd</code> file is currently open in the editor.</td></tr>
+            <tr><td>&lt;file.qmd&gt;</td><td>Pins the preview to a specific file regardless of what you are editing.</td></tr>
+          </table>
+          <p class="welcome-p" style="margin-top:0.6rem">The <strong>Logs</strong> tab shows quarto's output with ANSI colours. If the preview fails to start, an <strong>⚠ issues</strong> badge will appear in the status bar — click it to see the error detail.</p>
+        </div>
+
+        <!-- Settings -->
+        <div class="welcome-section">
+          <h3>Settings</h3>
+          <table class="welcome-table">
+            <tr><td>Theme</td><td>Dark or light colour scheme.</td></tr>
+            <tr><td>Font size</td><td>Editor font size, 10–22 px.</td></tr>
+            <tr><td>Tab size</td><td>2 or 4 spaces per indent level.</td></tr>
+            <tr><td>Word wrap</td><td>Soft-wrap long lines in the editor.</td></tr>
+            <tr><td>Auto-save</td><td>Saves silently after the configured delay (does not push to GitHub).</td></tr>
+            <tr><td>Vim mode</td><td>Enable CodeMirror Vim keybindings.</td></tr>
+            <tr><td>Commit message</td><td>Default message used when CTRL+S pushes to GitHub.</td></tr>
+            <tr><td>Preview debounce</td><td>Milliseconds to wait before restarting the preview when you switch files (Follow mode).</td></tr>
+            <tr><td>Custom snippets</td><td>CTRL+Space completions you define yourself — stored in your settings repo.</td></tr>
+          </table>
+          <p class="welcome-p" style="margin-top:0.6rem">Settings are persisted in a private GitHub repo named <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">{{ username }}-quarto-ed-settings</code> and restored on every login.</p>
+        </div>
+
+        <!-- Keyboard shortcuts -->
+        <div class="welcome-section">
+          <h3>Keyboard shortcuts</h3>
+          <table class="welcome-table">
+            <tr><td><kbd>Ctrl+S</kbd></td><td>Save the current file and push to GitHub.</td></tr>
+            <tr><td><kbd>Ctrl+Space</kbd></td><td>Open the snippet / autocomplete picker.</td></tr>
+            <tr><td><kbd>Ctrl+F</kbd></td><td>Find &amp; replace panel.</td></tr>
+            <tr><td><kbd>Ctrl+/</kbd></td><td>Toggle line comment.</td></tr>
+            <tr><td><kbd>Alt+↑ / ↓</kbd></td><td>Move current line up or down.</td></tr>
+            <tr><td><kbd>Ctrl+D</kbd></td><td>Select next occurrence of the current selection.</td></tr>
+          </table>
+          <p class="welcome-p" style="margin-top:0.6rem">Open <strong>☰ menu → Edit</strong> for all editor commands with their key bindings. <strong>☰ menu → Help → Quickhelp</strong> shows the full reference.</p>
+        </div>
+
+        <!-- Snippets -->
+        <div class="welcome-section">
+          <h3>Snippets</h3>
+          <p class="welcome-p">Press <kbd>Ctrl+Space</kbd> to open the picker. Built-in snippets:</p>
+          <div class="welcome-chips">
+            <span class="welcome-chip">r-chunk</span>
+            <span class="welcome-chip">r-chunk-opts</span>
+            <span class="welcome-chip">py-chunk</span>
+            <span class="welcome-chip">bash-chunk</span>
+            <span class="welcome-chip">callout-note</span>
+            <span class="welcome-chip">callout-warning</span>
+            <span class="welcome-chip">callout-tip</span>
+            <span class="welcome-chip">callout-important</span>
+            <span class="welcome-chip">tabset</span>
+            <span class="welcome-chip">columns</span>
+            <span class="welcome-chip">figure</span>
+            <span class="welcome-chip">yaml-html</span>
+            <span class="welcome-chip">yaml-pdf</span>
+            <span class="welcome-chip">yaml-revealjs</span>
+            <span class="welcome-chip">yaml-chapter</span>
+          </div>
+          <p class="welcome-p">Add your own under <strong>Settings → Custom snippets</strong>. Each snippet has a trigger label, a description, and a template with <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">${placeholder}</code> tab-stops.</p>
+        </div>
+
+        <!-- Sync -->
+        <div class="welcome-section">
+          <h3>Syncing to GitHub</h3>
+          <p class="welcome-p">The <kbd>↑ Sync</kbd> button in the top bar commits all staged changes and pushes to the current branch. <kbd>Ctrl+S</kbd> also pushes after saving, using the commit message configured in Settings.</p>
+          <div class="welcome-warn">⚠ The workspace lives in ephemeral container storage and is lost when the server restarts. Use <strong>↑ Sync</strong> or <strong>Ctrl+S</strong> to push your work to GitHub before closing the browser tab.</div>
+        </div>
+
+      </div>
     </div>
-    {% endif %}
   </div>
 
   <div class="resize-handle" id="resize-right"></div>
@@ -914,8 +1095,8 @@ function renderTabs() {
     bar.appendChild(div);
   }
   document.getElementById("cm-host").style.display = openTabs.size ? "flex" : "none";
-  const noMsg = document.getElementById("no-file-msg");
-  if (noMsg) noMsg.style.display = openTabs.size ? "none" : "flex";
+  const welcome = document.getElementById("welcome-pane");
+  if (welcome) welcome.style.display = openTabs.size ? "none" : "block";
 }
 
 function markDirty(path) {
