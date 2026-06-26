@@ -25,8 +25,8 @@
 
     /* ── CSS variables — referenced by JS and CodeMirror ── */
     :root {
-      --bg: #0b0a09; --bg2: #131110; --bg3: #1c1917;
-      --border: #2a2420; --text: #ede8e2; --text2: #6b5f57;
+      --bg: #0e0c0b; --bg2: #161311; --bg3: #201c19;
+      --border: #322b26; --text: #ede8e2; --text2: #9a8a80;
       --accent: #e8974a; --green: #4ade80; --red: #f87171;
       --yellow: #fbbf24; --purple: #c084fc;
     }
@@ -50,6 +50,15 @@
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
     * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+    /* ── CodeMirror gutter (Tailwind preflight can reset these) ── */
+    .cm-gutters {
+      background: var(--bg2) !important;
+      color: var(--text2) !important;
+      border-right: 1px solid var(--border) !important;
+    }
+    .cm-activeLineGutter { background: var(--bg3) !important; color: var(--text) !important; }
+    .cm-lineNumbers .cm-gutterElement { min-width: 3rem; padding: 0 0.5rem 0 0.35rem; }
 
     /* ── Layout ── */
     .layout { display: flex; flex: 1; overflow: hidden; }
