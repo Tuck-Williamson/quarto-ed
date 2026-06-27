@@ -64,6 +64,17 @@ COPY docker /app/docker
 RUN mkdir -p /workspace /var/log/supervisor \
     && chmod +x /app/docker/entrypoint.sh
 
+# Pre-generate the luaotfload font cache as root so that sandboxed users
+# (qe<user_id>, which have no home dir and no write access to /root/.TinyTeX)
+# can render PDFs without hitting "no writeable cache path" at runtime.
+# The dummy lualatex run writes the cache to $TEXMFVAR (inside /root/.TinyTeX);
+# the chmod below then makes it world-readable.
+RUN echo '\documentclass{article}\begin{document}x\end{document}' \
+      > /tmp/cache_warmup.tex \
+    && lualatex --interaction=batchmode --output-directory=/tmp /tmp/cache_warmup.tex \
+    || true \
+    && rm -f /tmp/cache_warmup.*
+
 # Sandbox hardening: `quarto preview` runs as a per-user unprivileged
 # account (qe<user_id>, see app/sandbox.py) that needs read+execute access
 # to the shared runtime (quarto, R, TinyTeX, Python packages) but must not
