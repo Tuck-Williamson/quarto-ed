@@ -438,6 +438,47 @@
     .settings-save-indicator { font-size: 0.7rem; color: var(--green); opacity: 0; transition: opacity 0.5s; }
     .settings-save-indicator.show { opacity: 1; }
     #font-size-val { width: 24px; text-align: right; font-size: 0.74rem; }
+    .settings-repo-note {
+      font-size: 0.68rem; color: var(--text2); margin-bottom: 0.875rem;
+      padding: 0.35rem 0.5rem; background: var(--bg); border-radius: 5px;
+      border-left: 2px solid var(--accent);
+    }
+    .scope-badge-repo {
+      font-size: 0.58rem; font-weight: 700; padding: 0.08rem 0.28rem;
+      border-radius: 3px; background: rgba(232,151,74,0.18); color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
+    }
+    .scope-set-btn {
+      font-size: 0.6rem; color: var(--text2); background: none; border: none;
+      cursor: pointer; padding: 0.08rem 0.18rem; font-family: inherit;
+      opacity: 0.55; white-space: nowrap; flex-shrink: 0;
+    }
+    .scope-set-btn:hover { opacity: 1; color: var(--accent); }
+    .scope-clear-btn {
+      font-size: 0.65rem; color: var(--text2); background: none; border: none;
+      cursor: pointer; padding: 0 0.12rem; font-family: inherit; line-height: 1; flex-shrink: 0;
+    }
+    .scope-clear-btn:hover { color: var(--red); }
+    .scope-help { position: relative; display: inline-block; vertical-align: middle; margin-left: 0.3rem; }
+    .scope-help-btn {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 1px solid currentColor; background: none;
+      color: var(--text2); font-size: 0.58rem; font-weight: 700; font-family: inherit;
+      cursor: pointer; padding: 0; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .scope-help-btn:hover, .scope-help-btn:focus { color: var(--accent); outline: none; }
+    .scope-help-tooltip {
+      display: none; position: absolute; top: calc(100% + 6px); right: 0;
+      width: 230px; background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 7px; padding: 0.55rem 0.7rem; font-size: 0.67rem;
+      line-height: 1.55; color: var(--text); z-index: 200;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.35); pointer-events: none;
+    }
+    .scope-help-tooltip strong { color: var(--accent); }
+    .scope-help-tooltip code { font-family: "JetBrains Mono", monospace; font-size: 0.85em; }
+    .scope-help-btn:hover + .scope-help-tooltip,
+    .scope-help-btn:focus + .scope-help-tooltip { display: block; }
 
     /* ── Toggle switch ── */
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
@@ -793,48 +834,83 @@
       <!-- Settings -->
       <div class="panel-pane" id="panel-settings">
         <div class="settings-scroll">
+          <div id="settings-repo-note" class="settings-repo-note" style="display:none">
+            Repo overrides stored in <code style="font-family:'JetBrains Mono',monospace;font-size:0.85em">.quarto-ed-settings</code> · committed on next sync.
+            <span class="scope-help">
+              <button class="scope-help-btn" aria-label="How repo settings work">?</button>
+              <div class="scope-help-tooltip">
+                <strong>+ repo</strong> — pins this setting to the current repo only, overriding your global value here.<br><br>
+                <strong>repo ×</strong> — this setting has a repo override. Click × to remove it and restore your global value.<br><br>
+                Overrides are saved in <code>.quarto-ed-settings</code> at the repo root and picked up on the next sync.
+              </div>
+            </span>
+          </div>
           <div class="settings-section">
             <h4>Editor</h4>
             <div class="settings-row">
               <span class="settings-label">Theme</span>
-              <select id="s-theme" onchange="onSettingChange()">
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-              </select>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <select id="s-theme" onchange="onSettingChange()">
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+                <span id="scope-theme"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Font size <span id="font-size-val">14</span></span>
-              <input type="range" id="s-fontSize" min="10" max="22" step="1" value="14"
-                     oninput="document.getElementById('font-size-val').textContent=this.value;onSettingChange()">
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <input type="range" id="s-fontSize" min="10" max="22" step="1" value="14"
+                       oninput="document.getElementById('font-size-val').textContent=this.value;onSettingChange()">
+                <span id="scope-fontSize"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Tab size</span>
-              <select id="s-tabSize" onchange="onSettingChange()">
-                <option value="2">2</option>
-                <option value="4">4</option>
-              </select>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <select id="s-tabSize" onchange="onSettingChange()">
+                  <option value="2">2</option>
+                  <option value="4">4</option>
+                </select>
+                <span id="scope-tabSize"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Word wrap</span>
-              <label class="toggle"><input type="checkbox" id="s-wordWrap" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <label class="toggle"><input type="checkbox" id="s-wordWrap" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+                <span id="scope-wordWrap"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Auto-save</span>
-              <label class="toggle"><input type="checkbox" id="s-autoSave" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <label class="toggle"><input type="checkbox" id="s-autoSave" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+                <span id="scope-autoSave"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Auto-save delay (minutes)</span>
-              <input type="number" id="s-autoSaveDelay" min="0.5" max="10" step="0.5" value="2" onchange="onSettingChange()">
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <input type="number" id="s-autoSaveDelay" min="0.5" max="10" step="0.5" value="2" onchange="onSettingChange()">
+                <span id="scope-autoSaveDelay"></span>
+              </div>
             </div>
             <div class="settings-row">
               <span class="settings-label">Vim keybindings</span>
-              <label class="toggle"><input type="checkbox" id="s-vimMode" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <label class="toggle"><input type="checkbox" id="s-vimMode" onchange="onSettingChange()"><span class="toggle-slider"></span></label>
+                <span id="scope-vimMode"></span>
+              </div>
             </div>
           </div>
           <div class="settings-section">
             <h4>Git</h4>
             <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:0.3rem">
-              <span class="settings-label">CTRL+S commit message</span>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <span class="settings-label">CTRL+S commit message</span>
+                <span id="scope-commitMessage"></span>
+              </div>
               <input type="text" id="s-commitMessage" value="User saved." oninput="onSettingChange()">
             </div>
           </div>
@@ -842,7 +918,10 @@
             <h4>Preview</h4>
             <div class="settings-row">
               <span class="settings-label">Follow-mode restart delay (ms)</span>
-              <input type="number" id="s-previewFollowDebounce" min="0" max="5000" step="250" value="1000" onchange="onSettingChange()">
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <input type="number" id="s-previewFollowDebounce" min="0" max="5000" step="250" value="1000" onchange="onSettingChange()">
+                <span id="scope-previewFollowDebounce"></span>
+              </div>
             </div>
           </div>
           <div class="settings-section">
@@ -980,11 +1059,15 @@ import AnsiUp from "https://esm.sh/ansi_up@5";
 let cmView = null;
 let currentFile = null;
 const openTabs = new Map(); // path → {content, dirty, state}
-let settings = {
+const _SETTINGS_DEFAULTS = {
   theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
-  autoSave: true, autoSaveDelay: 120000, vimMode: false, commitMessage: "User saved.",
-  previewFollowDebounce: 1000
+  autoSave: true, autoSaveDelay: 120000, vimMode: false,
+  commitMessage: "User saved.", previewFollowDebounce: 1000,
 };
+let settings = { ..._SETTINGS_DEFAULTS };
+let globalSettings = { ..._SETTINGS_DEFAULTS };
+let repoSettings = {};
+let workspaceLoaded = false;
 let userSnippets = [];
 let settingsSaveTimer = null;
 let autoSaveTimer = null;
@@ -1794,10 +1877,14 @@ async function loadSettings() {
       return;
     }
     const data = await res.json();
-    settings = { ...settings, ...data.settings };
+    globalSettings = { ..._SETTINGS_DEFAULTS, ...(data.global_settings || data.settings) };
+    repoSettings = data.repo_settings || {};
+    workspaceLoaded = data.workspace_loaded || false;
+    settings = { ...globalSettings, ...repoSettings };
     userSnippets = data.snippets || [];
     applySettings();
     renderSnippetsEditor();
+    renderSettingScopes();
     if (!data.repo_exists) {
       const name = `${window._tpl.username}-quarto-ed-settings`;
       document.getElementById("settings-repo-name").textContent = name;
@@ -1827,7 +1914,7 @@ function applySettings() {
 }
 
 window.onSettingChange = () => {
-  settings = {
+  const raw = {
     theme: document.getElementById("s-theme").value,
     fontSize: parseInt(document.getElementById("s-fontSize").value),
     tabSize: parseInt(document.getElementById("s-tabSize").value),
@@ -1838,9 +1925,14 @@ window.onSettingChange = () => {
     commitMessage: document.getElementById("s-commitMessage").value || "User saved.",
     previewFollowDebounce: parseInt(document.getElementById("s-previewFollowDebounce").value, 10),
   };
+  for (const [key, val] of Object.entries(raw)) {
+    if (key in repoSettings) repoSettings[key] = val;
+    else globalSettings[key] = val;
+  }
+  settings = { ..._SETTINGS_DEFAULTS, ...globalSettings, ...repoSettings };
   applySettings();
   clearTimeout(settingsSaveTimer);
-  settingsSaveTimer = setTimeout(persistSettings, 1500);
+  settingsSaveTimer = setTimeout(persistBothSettings, 1500);
 };
 
 async function persistSettings() {
@@ -1848,13 +1940,64 @@ async function persistSettings() {
   const res = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ settings, snippets }),
+    body: JSON.stringify({ settings: globalSettings, snippets }),
   });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     reportIssue("Settings save failed: " + extractDetail(d, res.statusText));
   } else {
     flashIndicator("settings-saved");
+  }
+}
+
+async function persistRepoSettings() {
+  if (!workspaceLoaded) return;
+  const res = await fetch("/api/settings/repo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings: repoSettings }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    reportIssue("Repo settings save failed: " + extractDetail(d, res.statusText));
+  } else {
+    flashIndicator("settings-saved");
+  }
+}
+
+async function persistBothSettings() {
+  const tasks = [persistSettings()];
+  if (Object.keys(repoSettings).length > 0) tasks.push(persistRepoSettings());
+  await Promise.all(tasks);
+}
+
+window.setRepoOverride = async (key) => {
+  clearTimeout(settingsSaveTimer);
+  repoSettings[key] = settings[key];
+  renderSettingScopes();
+  try { await persistRepoSettings(); } catch (e) { reportIssue("Repo settings save failed: " + e.message); }
+};
+
+window.clearRepoOverride = async (key) => {
+  delete repoSettings[key];
+  settings[key] = globalSettings[key];
+  applySettings();
+  renderSettingScopes();
+  try { await persistRepoSettings(); } catch (e) { reportIssue("Repo settings save failed: " + e.message); }
+};
+
+function renderSettingScopes() {
+  const note = document.getElementById("settings-repo-note");
+  if (note) note.style.display = workspaceLoaded ? "" : "none";
+  for (const key of Object.keys(_SETTINGS_DEFAULTS)) {
+    const el = document.getElementById(`scope-${key}`);
+    if (!el) continue;
+    if (!workspaceLoaded) { el.innerHTML = ""; continue; }
+    if (key in repoSettings) {
+      el.innerHTML = `<span class="scope-badge-repo">repo</span><button class="scope-clear-btn" onclick="clearRepoOverride('${key}')" title="Remove repo override">×</button>`;
+    } else {
+      el.innerHTML = `<button class="scope-set-btn" onclick="setRepoOverride('${key}')" title="Pin this setting to the current repo">+ repo</button>`;
+    }
   }
 }
 

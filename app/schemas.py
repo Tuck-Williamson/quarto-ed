@@ -34,6 +34,10 @@ class SettingsSaveRequest(BaseModel):
     snippets: list | None = None
 
 
+class RepoSettingsSaveRequest(BaseModel):
+    settings: dict
+
+
 class CommitRequest(BaseModel):
     message: str = "User saved."
 

@@ -29,6 +29,7 @@ from .schemas import (
     FileWriteRequest,
     GitignoreAddRequest,
     PreviewRestartRequest,
+    RepoSettingsSaveRequest,
     SettingsSaveRequest,
     SyncRequest,
     WorkspaceLoadRequest,
@@ -86,7 +87,7 @@ _SETTINGS_DEFAULTS = {
     "tabSize": 2,
     "wordWrap": True,
     "autoSave": True,
-    "autoSaveDelay": 2000,
+    "autoSaveDelay": 120000,
     "vimMode": False,
     "commitMessage": "User saved.",
     "previewFollowDebounce": 1000,
@@ -395,6 +396,23 @@ async def _push_settings(local_path: str, message: str = "Update settings"):
         await proc.wait()
         if proc.returncode != 0 and cmd[2] == "commit":
             break  # nothing to commit is fine
+
+
+def _repo_settings_path(workspace_path: str) -> str:
+    return os.path.join(workspace_path, ".quarto-ed-settings")
+
+
+def _load_repo_settings(workspace_path: str | None) -> dict:
+    if not workspace_path:
+        return {}
+    try:
+        with open(_repo_settings_path(workspace_path), encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if k in _SETTINGS_DEFAULTS}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 # ── Version / health ─────────────────────────────────────────────────────────
@@ -920,16 +938,24 @@ async def get_settings(request: Request):
     if not os.path.isdir(os.path.join(local_path, ".git")):
         cloned = await _ensure_settings_cloned(user.id, user.username, token)
         if not cloned:
-            return {"settings": _SETTINGS_DEFAULTS, "snippets": [], "repo_exists": False}
+            repo_settings = _load_repo_settings(sess.workspace_path)
+            return {
+                "settings": {**_SETTINGS_DEFAULTS, **repo_settings},
+                "global_settings": _SETTINGS_DEFAULTS.copy(),
+                "repo_settings": repo_settings,
+                "snippets": [],
+                "repo_exists": False,
+                "workspace_loaded": bool(sess.workspace_path),
+            }
 
-    settings = _SETTINGS_DEFAULTS.copy()
+    global_settings = _SETTINGS_DEFAULTS.copy()
     snippets: list = []
     settings_file = os.path.join(local_path, "settings.json")
     snippets_file = os.path.join(local_path, "snippets.json")
     if os.path.exists(settings_file):
         try:
             with open(settings_file) as f:
-                settings = {**_SETTINGS_DEFAULTS, **json.load(f)}
+                global_settings = {**_SETTINGS_DEFAULTS, **json.load(f)}
         except (json.JSONDecodeError, OSError):
             pass
     if os.path.exists(snippets_file):
@@ -939,7 +965,16 @@ async def get_settings(request: Request):
         except (json.JSONDecodeError, OSError):
             pass
 
-    return {"settings": settings, "snippets": snippets, "repo_exists": True}
+    repo_settings = _load_repo_settings(sess.workspace_path)
+    effective = {**global_settings, **repo_settings}
+    return {
+        "settings": effective,
+        "global_settings": global_settings,
+        "repo_settings": repo_settings,
+        "snippets": snippets,
+        "repo_exists": True,
+        "workspace_loaded": bool(sess.workspace_path),
+    }
 
 
 @router.post("/api/settings")
@@ -964,6 +999,27 @@ async def save_settings(request: Request, body: SettingsSaveRequest):
             json.dump(body.snippets, f, indent=2)
 
     await _push_settings(local_path)
+    return {"status": "ok"}
+
+
+@router.post("/api/settings/repo")
+async def save_repo_settings(request: Request, body: RepoSettingsSaveRequest):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if not sess.workspace_path:
+        raise HTTPException(status_code=400, detail="No workspace loaded")
+
+    repo_settings_file = _repo_settings_path(sess.workspace_path)
+    clean = {k: v for k, v in body.settings.items() if k in _SETTINGS_DEFAULTS}
+    try:
+        if clean:
+            with open(repo_settings_file, "w", encoding="utf-8") as f:
+                json.dump(clean, f, indent=2)
+        elif os.path.exists(repo_settings_file):
+            os.remove(repo_settings_file)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save repo settings: {exc}")
     return {"status": "ok"}
 
 
