@@ -58,7 +58,7 @@ jobs:
           echo "IMAGE_NAME=$LOWERS_IMAGE" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@c5b592240ad28845e24026d6e47d9e074d6e5748 # v3.10.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Log in to GHCR
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
