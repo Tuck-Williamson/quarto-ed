@@ -1908,9 +1908,7 @@ function applySettings() {
   document.getElementById("s-previewFollowDebounce").value = settings.previewFollowDebounce;
 
   document.body.className = settings.theme === "light" ? "light" : "";
-  if (cmView) {
-    document.getElementById("cm-host").style.fontSize = settings.fontSize + "px";
-  }
+  document.getElementById("cm-host").style.fontSize = settings.fontSize + "px";
 }
 
 window.onSettingChange = () => {
