@@ -120,3 +120,138 @@ async def test_save_settings_writes_to_local_repo(auth_client, monkeypatch, tmp_
     assert saved["theme"] == "dark"
     snips = json.loads((settings_dir / "snippets.json").read_text())
     assert snips == [{"label": "mysnip"}]
+
+
+# ---------------------------------------------------------------------------
+# Repo-level settings (POST /api/settings/repo, GET /api/settings)
+# ---------------------------------------------------------------------------
+
+async def test_save_repo_settings_no_workspace(auth_client, db_session, test_user, monkeypatch):
+    """POST /api/settings/repo returns 400 when no workspace is loaded."""
+    from app import auth, proxy
+    from app.models import Session as AppSession
+    import secrets
+
+    # Create a session with no workspace_path
+    token = secrets.token_hex(32)
+    sess_no_ws = AppSession(
+        session_token=token,
+        user_id=test_user.id,
+        workspace_path=None,
+    )
+    db_session.add(sess_no_ws)
+    await db_session.commit()
+    await db_session.refresh(sess_no_ws)
+
+    async def _mock_get_session(_request):
+        return sess_no_ws
+
+    monkeypatch.setattr(auth, "get_current_session", _mock_get_session)
+    monkeypatch.setattr(proxy, "get_current_session", _mock_get_session)
+
+    resp = await auth_client.post("/api/settings/repo", json={"settings": {"theme": "light"}})
+    assert resp.status_code == 400
+
+
+
+async def test_save_repo_settings_writes_and_get_reads(git_auth_client, monkeypatch, tmp_path):
+    """Full round-trip: write repo settings then read them back via GET."""
+    from app import proxy
+
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+
+    # Write repo override
+    resp = await client.post(
+        "/api/settings/repo",
+        json={"settings": {"theme": "light", "tabSize": 4}},
+    )
+    assert resp.status_code == 200
+
+    repo_file = workspace / ".quarto-ed-settings"
+    assert repo_file.exists()
+    saved = json.loads(repo_file.read_text())
+    assert saved == {"theme": "light", "tabSize": 4}
+
+    # Read back: need a settings repo too — stub clone to fail so we hit early-return
+    async def _mock_ensure_cloned(_user_id, _username, _token):
+        return False
+
+    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+
+    resp2 = await client.get("/api/settings")
+    assert resp2.status_code == 200
+    data = resp2.json()
+    assert data["repo_settings"] == {"theme": "light", "tabSize": 4}
+    assert data["settings"]["theme"] == "light"
+    assert data["settings"]["tabSize"] == 4
+    assert data["workspace_loaded"] is True
+
+
+async def test_save_repo_settings_deletes_file_when_empty(git_auth_client):
+    """POST /api/settings/repo with empty dict removes the file."""
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+
+    # Create the file first
+    repo_file = workspace / ".quarto-ed-settings"
+    repo_file.write_text(json.dumps({"theme": "light"}))
+
+    resp = await client.post("/api/settings/repo", json={"settings": {}})
+    assert resp.status_code == 200
+    assert not repo_file.exists()
+
+
+async def test_load_repo_settings_ignores_non_dict_json(git_auth_client, monkeypatch):
+    """Non-dict .quarto-ed-settings (e.g. a JSON array) must not crash GET /api/settings."""
+    from app import proxy
+
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+    (workspace / ".quarto-ed-settings").write_text("[1, 2, 3]")
+
+    async def _mock_ensure_cloned(_user_id, _username, _token):
+        return False
+
+    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+
+    resp = await client.get("/api/settings")
+    assert resp.status_code == 200
+    assert resp.json()["repo_settings"] == {}
+
+
+async def test_get_settings_includes_new_fields(auth_client, test_user, monkeypatch, tmp_path):
+    """GET /api/settings response now includes global_settings, repo_settings, workspace_loaded."""
+    from app import proxy
+
+    settings_dir = tmp_path / "testuser" / "testuser-quarto-ed-settings"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / ".git").mkdir()
+    (settings_dir / "settings.json").write_text(json.dumps({"theme": "light"}))
+
+    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+
+    resp = await auth_client.get("/api/settings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "global_settings" in data
+    assert "repo_settings" in data
+    assert "workspace_loaded" in data
+    assert data["global_settings"]["theme"] == "light"
+    assert data["repo_settings"] == {}
+
+
+async def test_save_repo_settings_strips_unknown_keys(git_auth_client):
+    """Unknown keys in the payload are silently dropped."""
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+
+    resp = await client.post(
+        "/api/settings/repo",
+        json={"settings": {"theme": "light", "__proto__": "bad", "evil": True}},
+    )
+    assert resp.status_code == 200
+    saved = json.loads((workspace / ".quarto-ed-settings").read_text())
+    assert "evil" not in saved
+    assert "__proto__" not in saved
+    assert saved == {"theme": "light"}
