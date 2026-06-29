@@ -7,11 +7,36 @@ on:
     branches: [main]
 
 env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  REGISTRY: ghcr.io
 
 jobs:
-  # Single job: build → test inside the image → push → deploy.
-  # Tests always run against the exact image that ships to production.
+  # ────────────────────────────────────────────────────────────────────────
+  # JOB 1: Fast Static Security Scans (Runs in parallel with the build)
+  # ────────────────────────────────────────────────────────────────────────
+  static-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python with Cache
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Security Tools
+        run: pip install pip-audit bandit
+
+      - name: Security scan – pip-audit
+        run: pip-audit -r requirements.txt
+
+      - name: Security scan – bandit
+        run: bandit -r app/ -c .bandit -ll
+
+  # ────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build, Test, and Deploy
+  # ────────────────────────────────────────────────────────────────────────
   build-test-deploy:
     runs-on: ubuntu-latest
     permissions:
@@ -20,101 +45,82 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Compute build metadata (version, short SHA)
+      - name: Compute build metadata
+        id: meta-vars
         run: |
-          echo "SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)" >> $GITHUB_ENV
+          echo "SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)" >> $GITHUB_OUTPUT
           APP_VERSION=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('app/__init__.py').read()).group(1))")
-          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
-
-      - name: Lowercase image name
-        run: |
-          echo "GHCR_IMAGE=$(echo '${{ env.GHCR_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_OUTPUT
+          
+          LOWERS_IMAGE=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=$LOWERS_IMAGE" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@c5b592240ad28845e24026d6e47d9e074d6e5748 # v3.10.0
 
-      - name: Log in to ghcr.io
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Static security scans (fast, run on host before Docker build) ──
-      - name: Security scan – pip-audit
-        run: pip install pip-audit && pip-audit -r requirements.txt
+      - name: Extract Docker metadata
+        id: docker_meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ${{ steps.meta-vars.outputs.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+            type=raw,value=sha-${{ steps.meta-vars.outputs.SHORT_SHA }}
+            type=raw,value=v${{ steps.meta-vars.outputs.APP_VERSION }},enable=${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+            type=ref,event=pr,prefix=pr-
 
-      - name: Security scan – bandit
-        run: pip install bandit && bandit -r app/ -c .bandit -ll
-
-      # ── Build production image ──────────────────────────────────────────
-      # load: true puts the image in the local Docker daemon for testing.
-      # We push manually after tests pass.
-      - name: Build production image
-        uses: docker/build-push-action@v6
+      - name: Build Test Image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
         with:
           context: .
+          file: Dockerfile.test
+          build-args: BASE_IMAGE=app:ci
           load: true
-          push: false
-          tags: app:ci
-          build-args: |
-            GIT_SHA=${{ env.SHORT_SHA }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: app:test
+          cache-from: type=gha,scope=test
+          cache-to: type=gha,mode=max,scope=test
 
-      # ── Image vulnerability scan (runs against the built image) ────────
-      - name: Security scan – trivy (image)
-        uses: aquasecurity/trivy-action@v0.36.0
+      - name: Run tests
+        run: docker run --rm app:test
+
+      - name: Cache Trivy Vulnerability DB
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
-          image-ref: app:ci
+          path: ~/.cache/trivy
+          key: ${{ runner.os }}-trivy-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-trivy-
+
+      - name: Build and Push Production Image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ steps.meta-vars.outputs.SHORT_SHA }}
+          cache-from: type=gha,scope=prod
+          cache-to: type=gha,mode=max,scope=prod
+
+      - name: Security scan – trivy (image)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta-vars.outputs.IMAGE_NAME }}:sha-${{ steps.meta-vars.outputs.SHORT_SHA }}
           format: table
           exit-code: 1
           severity: CRITICAL
           ignore-unfixed: true
           trivyignores: .trivyignore
-
-      # ── Run test suite inside the production image ──────────────────────
-      - name: Build test image (extends production + pytest deps)
-        run: |
-          docker build \
-            --build-arg BASE_IMAGE=app:ci \
-            -f Dockerfile.test \
-            -t app:test \
-            .
-
-      - name: Run tests
-        run: docker run --rm app:test
-
-      # ── Push production image (tests must pass first) ───────────────────
-      - name: Push production image to ghcr.io
-        if: github.event_name != 'pull_request'
-        run: |
-          docker tag app:ci "$GHCR_IMAGE:latest"
-          docker tag app:ci "$GHCR_IMAGE:sha-${SHORT_SHA}"
-          docker tag app:ci "$GHCR_IMAGE:v${APP_VERSION}"
-          docker push "$GHCR_IMAGE:latest"
-          docker push "$GHCR_IMAGE:sha-${SHORT_SHA}"
-          docker push "$GHCR_IMAGE:v${APP_VERSION}"
-
-      # ── Push PR image with PR number tag (for manual test-app deploys) ─────
-      - name: Log in to ghcr.io (PR builds)
-        if: github.event_name == 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push PR image to ghcr.io with PR tag
-        if: github.event_name == 'pull_request'
-        run: |
-          docker tag app:ci "$GHCR_IMAGE:pr-${{ github.event.number }}"
-          docker tag app:ci "$GHCR_IMAGE:sha-${SHORT_SHA}"
-          docker push "$GHCR_IMAGE:pr-${{ github.event.number }}"
-          docker push "$GHCR_IMAGE:sha-${SHORT_SHA}"
 
       # ── Deploy to Heroku ────────────────────────────────────────────────
       - name: Log in to Heroku registry
@@ -127,7 +133,8 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         id: heroku_push
         run: |
-          docker tag app:ci registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+          docker pull ${{ steps.meta-vars.outputs.IMAGE_NAME }}:sha-${{ steps.meta-vars.outputs.SHORT_SHA }}
+          docker tag ${{ steps.meta-vars.outputs.IMAGE_NAME }}:sha-${{ steps.meta-vars.outputs.SHORT_SHA }} registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
           docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
           IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web --format='{{.Id}}')
           echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
@@ -147,6 +154,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.meta-vars.outputs.APP_VERSION }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/v${APP_VERSION}" > /dev/null 2>&1; then
             echo "Tag v${APP_VERSION} already exists, skipping release."

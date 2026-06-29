@@ -1,12 +1,12 @@
 version: 2
 updates:
-  - package-ecosystem: pip
-    directory: /
+  # Automatically check for updates to GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
+      interval: "weekly" # Options: daily, weekly, monthly
+    groups:
+      # Optional: Groups multiple action updates into a single PR to minimize noise
+      github-actions-dependencies:
+        patterns:
+          - "*"
