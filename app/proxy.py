@@ -19,10 +19,12 @@ from sqlalchemy import select, update
 
 from . import __version__, sandbox
 from .auth import get_current_session
-from .database import decrypt_token, get_db_session
-from .models import Session, User
+from .database import decrypt_token, encrypt_token, get_db_session
+from .models import Session, User, UserAIConfig
 from .schemas import (
     AIChatRequest,
+    AIInlineRequest,
+    AIKeySaveRequest,
     CommitRequest,
     DeleteFileRequest,
     FileCreateRequest,
@@ -73,14 +75,6 @@ _GIT_SHA = os.environ.get("GIT_SHA", "unknown")
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
 
-_AI_SYSTEM = (
-    "You are a writing and coding assistant for Quarto documents. "
-    "Quarto is a scientific and technical publishing system built on Pandoc. "
-    "Help the user write, edit, structure, and improve their Quarto documents. "
-    "When showing code, use Quarto's fenced code chunk syntax (```{r}, ```{python}, etc.). "
-    "Be concise. Format your responses in Markdown compatible with Quarto."
-)
-
 _SETTINGS_DEFAULTS = {
     "theme": "dark",
     "fontSize": 14,
@@ -91,6 +85,21 @@ _SETTINGS_DEFAULTS = {
     "vimMode": False,
     "commitMessage": "User saved.",
     "previewFollowDebounce": 1000,
+    "aiProvider": "claude",
+    "aiClaudeModel": "",
+    "aiOllamaModel": "",
+    "aiOllamaEndpoint": "http://localhost:11434",
+    "inlineSystemPrompt": (
+        "You are an inline editing assistant for Quarto documents. "
+        "Make targeted, precise edits. Return only the replacement text with no explanation."
+    ),
+    "chatSystemPrompt": (
+        "You are a writing and coding assistant for Quarto documents. "
+        "Quarto is a scientific and technical publishing system built on Pandoc. "
+        "Help the user write, edit, structure, and improve their Quarto documents. "
+        "When showing code, use Quarto's fenced code chunk syntax (```{r}, ```{python}, etc.). "
+        "Be concise. Format your responses in Markdown compatible with Quarto."
+    ),
 }
 
 # ── Preview process state ────────────────────────────────────────────────────
@@ -344,6 +353,29 @@ def _safe_path(workspace: str, rel: str) -> str:
     return full
 
 
+# ── AI config helper ─────────────────────────────────────────────────────────
+
+async def _get_user_api_key(user_id: int) -> str:
+    """Return the Anthropic API key for the user, falling back to the server env var.
+
+    Provider, model, and endpoint are now user/repo settings — only the secret
+    key is stored in the DB.
+    """
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(UserAIConfig).where(UserAIConfig.user_id == user_id)
+        )
+        cfg = result.scalar_one_or_none()
+
+    if cfg and cfg.api_key_encrypted:
+        try:
+            return decrypt_token(cfg.api_key_encrypted)
+        except Exception:
+            return _ANTHROPIC_KEY
+
+    return _ANTHROPIC_KEY
+
+
 # ── Settings helpers ──────────────────────────────────────────────────────────
 
 def _settings_repo_local_path(username: str) -> str:
@@ -436,6 +468,16 @@ async def editor(request: Request):
     async with get_db_session() as db:
         result = await db.execute(select(User).where(User.id == sess.user_id))
         user = result.scalar_one_or_none()
+        ai_cfg_result = await db.execute(
+            select(UserAIConfig).where(UserAIConfig.user_id == sess.user_id)
+        )
+        ai_cfg = ai_cfg_result.scalar_one_or_none()
+    user_has_key = bool(
+        ai_cfg and (
+            (ai_cfg.provider == "claude" and ai_cfg.api_key_encrypted) or
+            ai_cfg.provider == "ollama"
+        )
+    )
     return templates.TemplateResponse(
         request,
         "editor.html",
@@ -444,7 +486,7 @@ async def editor(request: Request):
             "has_workspace": bool(sess.workspace_path),
             "repo_owner": sess.repo_owner or "",
             "repo_name": sess.repo_name or "",
-            "ai_enabled": bool(_ANTHROPIC_KEY),
+            "ai_enabled": bool(_ANTHROPIC_KEY or user_has_key),
             "quarto_version": _QUARTO_VERSION,
             "app_version": __version__,
             "git_sha": _GIT_SHA,
@@ -1023,6 +1065,79 @@ async def save_repo_settings(request: Request, body: RepoSettingsSaveRequest):
     return {"status": "ok"}
 
 
+# ── AI config endpoints ───────────────────────────────────────────────────────
+
+@router.get("/api/ai/config")
+async def get_ai_config(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(UserAIConfig).where(UserAIConfig.user_id == sess.user_id)
+        )
+        cfg = result.scalar_one_or_none()
+    has_key = bool(cfg and cfg.api_key_encrypted)
+    return {
+        "has_key": has_key,
+        "server_key_active": bool(_ANTHROPIC_KEY) and not has_key,
+    }
+
+
+@router.post("/api/ai/config")
+async def save_ai_config(request: Request, body: AIKeySaveRequest):
+    """Save (or clear) the user's Anthropic API key.
+
+    Provider, model, and Ollama endpoint are now user/repo-level settings stored
+    in the settings repo — only the secret key is managed here.
+    Sending provider='ollama' with no api_key clears any stored Claude key.
+    """
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    if body.provider not in ("claude", "ollama"):
+        raise HTTPException(status_code=400, detail="provider must be 'claude' or 'ollama'")
+
+    encrypted_key: bytes | None = None
+    if body.provider == "claude" and body.api_key:
+        encrypted_key = encrypt_token(body.api_key)
+
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(UserAIConfig).where(UserAIConfig.user_id == sess.user_id)
+        )
+        cfg = result.scalar_one_or_none()
+        if cfg:
+            if encrypted_key is not None:
+                cfg.api_key_encrypted = encrypted_key
+            elif body.provider == "ollama":
+                cfg.api_key_encrypted = None
+        else:
+            db.add(UserAIConfig(
+                user_id=sess.user_id,
+                provider=body.provider,
+                api_key_encrypted=encrypted_key,
+            ))
+        await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/api/ai/config")
+async def clear_ai_key(request: Request):
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(UserAIConfig).where(UserAIConfig.user_id == sess.user_id)
+        )
+        cfg = result.scalar_one_or_none()
+        if cfg:
+            cfg.api_key_encrypted = None
+        await db.commit()
+    return {"status": "ok"}
+
+
 # ── AI Chat ───────────────────────────────────────────────────────────────────
 
 @router.post("/api/ai/chat")
@@ -1030,12 +1145,22 @@ async def ai_chat(request: Request, body: AIChatRequest):
     sess = await get_current_session(request)
     if not sess:
         raise HTTPException(status_code=401)
-    if not _ANTHROPIC_KEY:
+
+    # Provider, model, and endpoint are now settings — sent by the client.
+    # Ollama calls are browser-direct; this endpoint only proxies Claude.
+    if (body.provider or "claude") == "ollama":
+        raise HTTPException(status_code=400, detail="ollama_browser_direct")
+
+    api_key = await _get_user_api_key(sess.user_id)
+    if not api_key:
         raise HTTPException(status_code=503, detail="AI not configured")
 
+    model = body.model or _AI_MODEL
     user_content = body.message
     if body.context:
         user_content = f"<document>\n{body.context}\n</document>\n\n{body.message}"
+
+    system_prompt = body.system_prompt or _SETTINGS_DEFAULTS["chatSystemPrompt"]
 
     async def generate():
         async with httpx.AsyncClient(timeout=120) as client:
@@ -1043,22 +1168,68 @@ async def ai_chat(request: Request, body: AIChatRequest):
                 "POST",
                 "https://api.anthropic.com/v1/messages",
                 headers={
-                    "x-api-key": _ANTHROPIC_KEY,
+                    "x-api-key": api_key,
                     "anthropic-version": "2023-06-01",
                     "content-type": "application/json",
                 },
                 json={
-                    "model": _AI_MODEL,
+                    "model": model,
                     "max_tokens": 4096,
                     "stream": True,
-                    "system": _AI_SYSTEM,
+                    "system": system_prompt,
                     "messages": [{"role": "user", "content": user_content}],
                 },
             ) as response:
+                if response.status_code != 200:
+                    yield f"data: {{\"type\":\"error\",\"error\":{{\"message\":\"AI request failed ({response.status_code})\"}}}}\n\n"
+                    return
                 async for chunk in response.aiter_text():
                     yield chunk
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.post("/api/ai/inline")
+async def ai_inline(request: Request, body: AIInlineRequest):
+    """Single-shot inline prompt endpoint (Claude only — Ollama is browser-direct)."""
+    sess = await get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401)
+
+    if (body.provider or "claude") == "ollama":
+        raise HTTPException(status_code=400, detail="ollama_browser_direct")
+
+    api_key = await _get_user_api_key(sess.user_id)
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    model = body.model or _AI_MODEL
+    user_content = body.prompt
+    if body.selection:
+        user_content = f"{body.prompt}\n\n<selection>\n{body.selection}\n</selection>"
+
+    system_prompt = body.system_prompt or _SETTINGS_DEFAULTS["inlineSystemPrompt"]
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": model,
+                "max_tokens": 4096,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_content}],
+            },
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail="AI request failed")
+    data = response.json()
+    text = (data.get("content") or [{}])[0].get("text", "")
+    return {"text": text}
 
 
 # ── Preview logs ─────────────────────────────────────────────────────────────

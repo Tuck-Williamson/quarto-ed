@@ -42,9 +42,25 @@ class CommitRequest(BaseModel):
     message: str = "User saved."
 
 
+class AIKeySaveRequest(BaseModel):
+    provider: str               # "claude" | "ollama"
+    api_key: str | None = None  # Claude only; Ollama calls are browser-direct
+
+
+class AIInlineRequest(BaseModel):
+    prompt: str
+    selection: str | None = None
+    system_prompt: str | None = None
+    provider: str | None = None  # sent by client from settings
+    model: str | None = None     # sent by client from settings
+
+
 class AIChatRequest(BaseModel):
     message: str
     context: str | None = None
+    system_prompt: str | None = None
+    provider: str | None = None  # sent by client from settings
+    model: str | None = None     # sent by client from settings
 
 
 class PreviewRestartRequest(BaseModel):

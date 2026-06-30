@@ -178,10 +178,15 @@ jobs:
 
       # ── Auto-bump patch version for next release ─────────────────────────
       # Runs after the release so the current version is tagged first.
-      # [skip ci] prevents the push from re-triggering this workflow;
-      # GITHUB_TOKEN pushes are also exempt from workflow re-triggering.
+      # Requires VERSION_BUMP_TOKEN (fine-grained PAT, Contents read+write).
+      # GITHUB_TOKEN authenticates as github-actions[bot], which cannot bypass
+      # the required-PR branch protection on main. A PAT authenticates as the
+      # repo owner (admin), who can bypass since enforce_admins=false.
+      # [skip ci] prevents the PAT push from re-triggering this workflow.
       - name: Bump patch version
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          VERSION_BUMP_TOKEN: ${{ secrets.VERSION_BUMP_TOKEN }}
         run: |
           CURRENT=${{ steps.meta-vars.outputs.APP_VERSION }}
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
@@ -193,4 +198,11 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add app/__init__.py
           git commit -m "chore: bump version ${CURRENT} → ${NEW} [skip ci]"
+          if [ -z "$VERSION_BUMP_TOKEN" ]; then
+            echo "::error::VERSION_BUMP_TOKEN secret not set. Create a fine-grained PAT" \
+              "(Contents: read+write for this repo) and add it as a repo secret."
+            exit 1
+          fi
+          git remote set-url origin \
+            "https://x-access-token:${VERSION_BUMP_TOKEN}@github.com/${{ github.repository }}"
           git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main)
