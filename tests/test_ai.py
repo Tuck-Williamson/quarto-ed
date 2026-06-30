@@ -4,9 +4,9 @@ Covers:
   - GET/POST/DELETE /api/ai/config
   - POST /api/ai/chat  (Claude server-proxy path)
   - POST /api/ai/inline (Claude server-proxy path)
-  - Ollama rejection (browser-direct path)
-  - _get_user_ai_config fallback logic
-  - New settings defaults (inlineSystemPrompt / chatSystemPrompt)
+  - Ollama rejection (browser-direct path; provider now comes from request body)
+  - _get_user_api_key fallback logic
+  - New settings defaults (aiProvider/aiClaudeModel/aiOllamaModel/aiOllamaEndpoint/inlineSystemPrompt/chatSystemPrompt)
   - ai_enabled flag on /editor
 """
 import json
@@ -53,30 +53,31 @@ async def test_ai_inline_unauthenticated(anon_client):
 # ---------------------------------------------------------------------------
 
 async def test_get_ai_config_defaults_when_no_row(auth_client, monkeypatch):
-    """Without a user_ai_config row, returns defaults derived from server env."""
+    """Without a user_ai_config row, has_key=False and server_key_active reflects env."""
     import app.proxy as proxy_mod
     monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
-    monkeypatch.setattr(proxy_mod, "_AI_MODEL", "claude-sonnet-4-6")
 
     resp = await auth_client.get("/api/ai/config")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["provider"] == "claude"
     assert data["has_key"] is False
-    assert data["model"] == "claude-sonnet-4-6"
-    assert data["ollama_endpoint"] == ""
     assert data["server_key_active"] is False
+    # provider/model/endpoint are now settings, not returned from this endpoint
+    assert "provider" not in data
+    assert "model" not in data
+    assert "ollama_endpoint" not in data
 
 
 async def test_get_ai_config_reflects_server_key(auth_client, monkeypatch):
-    """When server ANTHROPIC_API_KEY is set and no user row, server_key_active is True."""
+    """When server ANTHROPIC_API_KEY is set but no user key, server_key_active is True and has_key is False."""
     import app.proxy as proxy_mod
     monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-key")
 
     resp = await auth_client.get("/api/ai/config")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["has_key"] is True
+    # has_key reflects whether the user has their own stored key (they don't here)
+    assert data["has_key"] is False
     assert data["server_key_active"] is True
 
 
@@ -88,7 +89,7 @@ async def test_post_ai_config_saves_claude_key(auth_client, test_user, db_sessio
     """Saving a Claude key encrypts it and stores a user_ai_config row."""
     resp = await auth_client.post(
         "/api/ai/config",
-        json={"provider": "claude", "api_key": "sk-ant-test123", "model": "claude-sonnet-4-6"},
+        json={"provider": "claude", "api_key": "sk-ant-test123"},
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
@@ -99,34 +100,31 @@ async def test_post_ai_config_saves_claude_key(auth_client, test_user, db_sessio
     )
     cfg = result.scalar_one_or_none()
     assert cfg is not None
-    assert cfg.provider == "claude"
-    assert cfg.model == "claude-sonnet-4-6"
     # Key must be stored encrypted, not in plaintext
     assert cfg.api_key_encrypted is not None
     assert cfg.api_key_encrypted != b"sk-ant-test123"
     assert decrypt_token(cfg.api_key_encrypted) == "sk-ant-test123"
+    # model/provider/endpoint are now settings, not persisted to DB via this endpoint
 
 
 async def test_post_ai_config_saves_ollama(auth_client, test_user, db_session):
-    """Saving Ollama config stores endpoint and model; no key is encrypted."""
+    """Switching to Ollama clears any stored key; no model/endpoint stored in DB."""
+    # First seed a Claude key
+    cfg = UserAIConfig(
+        user_id=test_user.id,
+        provider="claude",
+        api_key_encrypted=encrypt_token("sk-ant-old"),
+    )
+    db_session.add(cfg)
+    await db_session.commit()
+
     resp = await auth_client.post(
         "/api/ai/config",
-        json={
-            "provider": "ollama",
-            "model": "llama3",
-            "ollama_endpoint": "http://localhost:11434",
-        },
+        json={"provider": "ollama"},
     )
     assert resp.status_code == 200
 
-    from sqlalchemy import select
-    result = await db_session.execute(
-        select(UserAIConfig).where(UserAIConfig.user_id == test_user.id)
-    )
-    cfg = result.scalar_one_or_none()
-    assert cfg.provider == "ollama"
-    assert cfg.model == "llama3"
-    assert cfg.ollama_endpoint == "http://localhost:11434"
+    await db_session.refresh(cfg)
     assert cfg.api_key_encrypted is None
 
 
@@ -169,27 +167,20 @@ async def test_post_ai_config_without_key_does_not_overwrite_existing_key(
         user_id=test_user.id,
         provider="claude",
         api_key_encrypted=encrypted,
-        model="claude-opus-4-8",
     )
     db_session.add(cfg)
     await db_session.commit()
 
-    # Update model only — no api_key in payload
+    # POST provider=claude without api_key — key must be preserved
     resp = await auth_client.post(
         "/api/ai/config",
-        json={"provider": "claude", "model": "claude-sonnet-4-6"},
+        json={"provider": "claude"},
     )
     assert resp.status_code == 200
 
-    from sqlalchemy import select
     await db_session.refresh(cfg)
-    result = await db_session.execute(
-        select(UserAIConfig).where(UserAIConfig.user_id == test_user.id)
-    )
-    updated = result.scalar_one()
     # Key must still be the original
-    assert updated.api_key_encrypted == encrypted
-    assert updated.model == "claude-sonnet-4-6"
+    assert cfg.api_key_encrypted == encrypted
 
 
 # ---------------------------------------------------------------------------
@@ -197,21 +188,23 @@ async def test_post_ai_config_without_key_does_not_overwrite_existing_key(
 # ---------------------------------------------------------------------------
 
 async def test_get_ai_config_after_save(auth_client):
-    """GET reflects what was saved via POST."""
+    """GET reflects key status after POST — provider/model/endpoint are not returned."""
     await auth_client.post(
         "/api/ai/config",
-        json={"provider": "ollama", "model": "mistral", "ollama_endpoint": "http://gpu-box:11434"},
+        json={"provider": "claude", "api_key": "sk-ant-abc"},
     )
     resp = await auth_client.get("/api/ai/config")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["provider"] == "ollama"
-    assert data["model"] == "mistral"
-    assert data["ollama_endpoint"] == "http://gpu-box:11434"
-    assert data["has_key"] is True   # Ollama = always "has key" (no key needed)
-    # The actual key is never returned
+    assert data["has_key"] is True
+    assert data["server_key_active"] is False
+    # Sensitive data must never be returned
     assert "api_key" not in data
     assert "api_key_encrypted" not in data
+    # provider/model/endpoint live in settings now, not returned here
+    assert "provider" not in data
+    assert "model" not in data
+    assert "ollama_endpoint" not in data
 
 
 async def test_get_ai_config_has_key_true_for_claude_with_stored_key(
@@ -384,17 +377,12 @@ async def test_ai_chat_uses_default_system_prompt_when_none_provided(
     assert proxy_mod._SETTINGS_DEFAULTS["chatSystemPrompt"] in captured["system"]
 
 
-async def test_ai_chat_rejects_ollama_provider(auth_client, test_user, db_session):
-    """When user's provider is 'ollama', /api/ai/chat returns 400 with detail 'ollama_browser_direct'."""
-    cfg = UserAIConfig(
-        user_id=test_user.id,
-        provider="ollama",
-        ollama_endpoint="http://localhost:11434",
-    )
-    db_session.add(cfg)
-    await db_session.commit()
+async def test_ai_chat_rejects_ollama_provider(auth_client):
+    """When provider='ollama' is in the request body, /api/ai/chat returns 400 ollama_browser_direct.
 
-    resp = await auth_client.post("/api/ai/chat", json={"message": "hello"})
+    Provider is now sent from client settings, not looked up from the DB.
+    """
+    resp = await auth_client.post("/api/ai/chat", json={"message": "hello", "provider": "ollama"})
     assert resp.status_code == 400
     assert resp.json()["detail"] == "ollama_browser_direct"
 
@@ -522,17 +510,12 @@ async def test_ai_inline_uses_custom_system_prompt(
     assert captured["system"] == "Be extremely terse."
 
 
-async def test_ai_inline_rejects_ollama_provider(auth_client, test_user, db_session):
-    """When provider is 'ollama', /api/ai/inline returns 400 ollama_browser_direct."""
-    cfg = UserAIConfig(
-        user_id=test_user.id,
-        provider="ollama",
-        ollama_endpoint="http://localhost:11434",
-    )
-    db_session.add(cfg)
-    await db_session.commit()
+async def test_ai_inline_rejects_ollama_provider(auth_client):
+    """When provider='ollama' is in the request body, /api/ai/inline returns 400 ollama_browser_direct.
 
-    resp = await auth_client.post("/api/ai/inline", json={"prompt": "rewrite"})
+    Provider is now sent from client settings, not looked up from the DB.
+    """
+    resp = await auth_client.post("/api/ai/inline", json={"prompt": "rewrite", "provider": "ollama"})
     assert resp.status_code == 400
     assert resp.json()["detail"] == "ollama_browser_direct"
 
@@ -568,26 +551,20 @@ async def test_ai_inline_without_selection(auth_client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _get_user_ai_config fallback logic
+# _get_user_api_key fallback logic
 # ---------------------------------------------------------------------------
 
-async def test_get_user_ai_config_falls_back_to_server_env(test_user, monkeypatch):
-    """When no user_ai_config row exists, falls back to server env vars."""
+async def test_get_user_api_key_falls_back_to_server_env(test_user, monkeypatch):
+    """When no user_ai_config row exists, falls back to the server API key env var."""
     import app.proxy as proxy_mod
     monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-fallback")
-    monkeypatch.setattr(proxy_mod, "_AI_MODEL", "claude-sonnet-4-6")
 
-    provider, api_key, model, ollama_endpoint = await proxy_mod._get_user_ai_config(
-        test_user.id
-    )
-    assert provider == "claude"
+    api_key = await proxy_mod._get_user_api_key(test_user.id)
     assert api_key == "sk-server-fallback"
-    assert model == "claude-sonnet-4-6"
-    assert ollama_endpoint == ""
 
 
-async def test_get_user_ai_config_uses_user_row(test_user, db_session, monkeypatch):
-    """When a user row exists with a key, it is decrypted and returned."""
+async def test_get_user_api_key_uses_user_row(test_user, db_session, monkeypatch):
+    """When a user row exists with a stored key, it is decrypted and returned."""
     import app.proxy as proxy_mod
     monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-should-not-be-used")
 
@@ -595,60 +572,34 @@ async def test_get_user_ai_config_uses_user_row(test_user, db_session, monkeypat
         user_id=test_user.id,
         provider="claude",
         api_key_encrypted=encrypt_token("sk-ant-user-key"),
-        model="claude-opus-4-8",
     )
     db_session.add(cfg)
     await db_session.commit()
 
-    provider, api_key, model, _ = await proxy_mod._get_user_ai_config(test_user.id)
-    assert provider == "claude"
+    api_key = await proxy_mod._get_user_api_key(test_user.id)
     assert api_key == "sk-ant-user-key"
-    assert model == "claude-opus-4-8"
 
 
-async def test_get_user_ai_config_ollama_returns_empty_key(test_user, db_session):
-    """For Ollama provider, api_key is always empty (calls are browser-direct)."""
-    import app.proxy as proxy_mod
-
-    cfg = UserAIConfig(
-        user_id=test_user.id,
-        provider="ollama",
-        ollama_endpoint="http://localhost:11434",
-        model="llama3",
-    )
-    db_session.add(cfg)
-    await db_session.commit()
-
-    provider, api_key, model, ollama_endpoint = await proxy_mod._get_user_ai_config(
-        test_user.id
-    )
-    assert provider == "ollama"
-    assert api_key == ""
-    assert model == "llama3"
-    assert ollama_endpoint == "http://localhost:11434"
-
-
-async def test_get_user_ai_config_claude_no_user_key_falls_back_to_server(
+async def test_get_user_api_key_no_stored_key_falls_back_to_server(
     test_user, db_session, monkeypatch
 ):
-    """Claude row with no stored key falls back to server env var key."""
+    """A row with no stored key falls back to the server env var."""
     import app.proxy as proxy_mod
     monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-backup")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
         provider="claude",
-        api_key_encrypted=None,  # no key stored
-        model="claude-sonnet-4-6",
+        api_key_encrypted=None,
     )
     db_session.add(cfg)
     await db_session.commit()
 
-    _, api_key, _, _ = await proxy_mod._get_user_ai_config(test_user.id)
+    api_key = await proxy_mod._get_user_api_key(test_user.id)
     assert api_key == "sk-server-backup"
 
 
-async def test_get_user_ai_config_decrypt_failure_falls_back_to_server(
+async def test_get_user_api_key_decrypt_failure_falls_back_to_server(
     test_user, db_session, monkeypatch
 ):
     """If stored key is undecryptable (e.g. after key rotation), falls back to server key."""
@@ -663,7 +614,7 @@ async def test_get_user_ai_config_decrypt_failure_falls_back_to_server(
     db_session.add(cfg)
     await db_session.commit()
 
-    _, api_key, _, _ = await proxy_mod._get_user_ai_config(test_user.id)
+    api_key = await proxy_mod._get_user_api_key(test_user.id)
     assert api_key == "sk-server-fallback"
 
 
@@ -684,7 +635,7 @@ async def test_save_ai_config_switching_to_ollama_clears_claude_key(
 
     resp = await auth_client.post(
         "/api/ai/config",
-        json={"provider": "ollama", "ollama_endpoint": "http://localhost:11434"},
+        json={"provider": "ollama"},
     )
     assert resp.status_code == 200
 
@@ -719,8 +670,8 @@ async def test_ai_inline_empty_content_list_returns_empty_text(
 # New settings defaults include prompt fields
 # ---------------------------------------------------------------------------
 
-async def test_settings_defaults_include_prompt_fields(auth_client, monkeypatch):
-    """GET /api/settings returns inlineSystemPrompt and chatSystemPrompt in defaults."""
+async def test_settings_defaults_include_prompt_and_ai_fields(auth_client, monkeypatch):
+    """GET /api/settings returns AI provider/model/endpoint and prompt defaults."""
     from app import proxy
 
     async def _mock_ensure_cloned(_user_id, _username, _token):
@@ -735,6 +686,11 @@ async def test_settings_defaults_include_prompt_fields(auth_client, monkeypatch)
     assert "chatSystemPrompt" in settings
     assert len(settings["inlineSystemPrompt"]) > 0
     assert len(settings["chatSystemPrompt"]) > 0
+    # AI provider/model/endpoint are now settings
+    assert settings["aiProvider"] == "claude"
+    assert "aiClaudeModel" in settings
+    assert "aiOllamaModel" in settings
+    assert settings["aiOllamaEndpoint"] == "http://localhost:11434"
 
 
 async def test_custom_system_prompts_are_saved_and_returned(

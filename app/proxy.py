@@ -85,6 +85,10 @@ _SETTINGS_DEFAULTS = {
     "vimMode": False,
     "commitMessage": "User saved.",
     "previewFollowDebounce": 1000,
+    "aiProvider": "claude",
+    "aiClaudeModel": "",
+    "aiOllamaModel": "",
+    "aiOllamaEndpoint": "http://localhost:11434",
     "inlineSystemPrompt": (
         "You are an inline editing assistant for Quarto documents. "
         "Make targeted, precise edits. Return only the replacement text with no explanation."
@@ -351,11 +355,11 @@ def _safe_path(workspace: str, rel: str) -> str:
 
 # ── AI config helper ─────────────────────────────────────────────────────────
 
-async def _get_user_ai_config(user_id: int) -> tuple[str, str, str, str]:
-    """Return (provider, api_key, model, ollama_endpoint) for the user.
+async def _get_user_api_key(user_id: int) -> str:
+    """Return the Anthropic API key for the user, falling back to the server env var.
 
-    Falls back to server env vars when no user config row exists.
-    For Ollama, api_key is always empty — calls are browser-direct.
+    Provider, model, and endpoint are now user/repo settings — only the secret
+    key is stored in the DB.
     """
     async with get_db_session() as db:
         result = await db.execute(
@@ -363,23 +367,13 @@ async def _get_user_ai_config(user_id: int) -> tuple[str, str, str, str]:
         )
         cfg = result.scalar_one_or_none()
 
-    if cfg and cfg.provider:
-        provider = cfg.provider
-        model = cfg.model or (_AI_MODEL if provider == "claude" else "llama3")
-        ollama_endpoint = cfg.ollama_endpoint or "http://localhost:11434"
-        if provider == "claude" and cfg.api_key_encrypted:
-            try:
-                api_key = decrypt_token(cfg.api_key_encrypted)
-            except Exception:
-                api_key = _ANTHROPIC_KEY
-        elif provider == "claude":
-            api_key = _ANTHROPIC_KEY
-        else:
-            api_key = ""
-        return provider, api_key, model, ollama_endpoint
+    if cfg and cfg.api_key_encrypted:
+        try:
+            return decrypt_token(cfg.api_key_encrypted)
+        except Exception:
+            return _ANTHROPIC_KEY
 
-    # No user config — fall back to server defaults
-    return "claude", _ANTHROPIC_KEY, _AI_MODEL, ""
+    return _ANTHROPIC_KEY
 
 
 # ── Settings helpers ──────────────────────────────────────────────────────────
@@ -1083,28 +1077,21 @@ async def get_ai_config(request: Request):
             select(UserAIConfig).where(UserAIConfig.user_id == sess.user_id)
         )
         cfg = result.scalar_one_or_none()
-    if not cfg:
-        return {
-            "provider": "claude",
-            "has_key": bool(_ANTHROPIC_KEY),
-            "model": _AI_MODEL,
-            "ollama_endpoint": "",
-            "server_key_active": bool(_ANTHROPIC_KEY),
-        }
+    has_key = bool(cfg and cfg.api_key_encrypted)
     return {
-        "provider": cfg.provider or "claude",
-        "has_key": bool(
-            (cfg.provider == "claude" and cfg.api_key_encrypted) or
-            cfg.provider == "ollama"
-        ),
-        "model": cfg.model or "",
-        "ollama_endpoint": cfg.ollama_endpoint or "",
-        "server_key_active": bool(_ANTHROPIC_KEY) and not cfg.api_key_encrypted,
+        "has_key": has_key,
+        "server_key_active": bool(_ANTHROPIC_KEY) and not has_key,
     }
 
 
 @router.post("/api/ai/config")
 async def save_ai_config(request: Request, body: AIKeySaveRequest):
+    """Save (or clear) the user's Anthropic API key.
+
+    Provider, model, and Ollama endpoint are now user/repo-level settings stored
+    in the settings repo — only the secret key is managed here.
+    Sending provider='ollama' with no api_key clears any stored Claude key.
+    """
     sess = await get_current_session(request)
     if not sess:
         raise HTTPException(status_code=401)
@@ -1121,20 +1108,15 @@ async def save_ai_config(request: Request, body: AIKeySaveRequest):
         )
         cfg = result.scalar_one_or_none()
         if cfg:
-            cfg.provider = body.provider
             if encrypted_key is not None:
                 cfg.api_key_encrypted = encrypted_key
             elif body.provider == "ollama":
                 cfg.api_key_encrypted = None
-            cfg.model = body.model or None
-            cfg.ollama_endpoint = body.ollama_endpoint or None
         else:
             db.add(UserAIConfig(
                 user_id=sess.user_id,
                 provider=body.provider,
                 api_key_encrypted=encrypted_key,
-                model=body.model or None,
-                ollama_endpoint=body.ollama_endpoint or None,
             ))
         await db.commit()
     return {"status": "ok"}
@@ -1164,15 +1146,16 @@ async def ai_chat(request: Request, body: AIChatRequest):
     if not sess:
         raise HTTPException(status_code=401)
 
-    provider, api_key, model, _ = await _get_user_ai_config(sess.user_id)
-
-    if provider == "ollama":
-        # Ollama calls are browser-direct; this endpoint only handles Claude.
+    # Provider, model, and endpoint are now settings — sent by the client.
+    # Ollama calls are browser-direct; this endpoint only proxies Claude.
+    if (body.provider or "claude") == "ollama":
         raise HTTPException(status_code=400, detail="ollama_browser_direct")
 
+    api_key = await _get_user_api_key(sess.user_id)
     if not api_key:
         raise HTTPException(status_code=503, detail="AI not configured")
 
+    model = body.model or _AI_MODEL
     user_content = body.message
     if body.context:
         user_content = f"<document>\n{body.context}\n</document>\n\n{body.message}"
@@ -1213,14 +1196,14 @@ async def ai_inline(request: Request, body: AIInlineRequest):
     if not sess:
         raise HTTPException(status_code=401)
 
-    provider, api_key, model, _ = await _get_user_ai_config(sess.user_id)
-
-    if provider == "ollama":
+    if (body.provider or "claude") == "ollama":
         raise HTTPException(status_code=400, detail="ollama_browser_direct")
 
+    api_key = await _get_user_api_key(sess.user_id)
     if not api_key:
         raise HTTPException(status_code=503, detail="AI not configured")
 
+    model = body.model or _AI_MODEL
     user_content = body.prompt
     if body.selection:
         user_content = f"{body.prompt}\n\n<selection>\n{body.selection}\n</selection>"

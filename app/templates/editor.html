@@ -448,6 +448,16 @@
       border-radius: 3px; background: rgba(232,151,74,0.18); color: var(--accent);
       text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
     }
+    .ollama-repo-warning {
+      display: flex; align-items: flex-start; gap: 0.35rem;
+      font-size: 0.72rem; color: var(--accent);
+      background: rgba(232,151,74,0.1); border: 1px solid rgba(232,151,74,0.28);
+      border-radius: 5px; padding: 0.35rem 0.5rem; margin-bottom: 0.5rem;
+      line-height: 1.45;
+    }
+    .ollama-repo-warning code {
+      font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; word-break: break-all;
+    }
     .scope-set-btn {
       font-size: 0.6rem; color: var(--text2); background: none; border: none;
       cursor: pointer; padding: 0.08rem 0.18rem; font-family: inherit;
@@ -807,6 +817,9 @@
           <button class="btn" style="margin-top:0.5rem;font-size:0.7rem" onclick="switchPanel('settings');document.getElementById('ai-settings-section').scrollIntoView({behavior:'smooth'})">Configure AI in Settings →</button>
         </div>
         <div id="ai-chat-ui">
+          <div id="ollama-repo-endpoint-warning" class="ollama-repo-warning" style="display:none">
+            ⚠ Ollama endpoint set by this repo: <code id="ollama-repo-endpoint-url"></code>
+          </div>
           <div class="ai-messages" id="ai-messages">
             <div class="ai-msg assistant" style="color:var(--text2)">
               Ask me to help write, edit, or improve your Quarto document.
@@ -931,7 +944,10 @@
           <div class="settings-section" id="ai-settings-section">
             <h4>AI</h4>
             <div class="settings-row">
-              <span class="settings-label">Provider</span>
+              <div style="display:flex;align-items:center;gap:0.4rem">
+                <span class="settings-label">Provider</span>
+                <span id="scope-aiProvider"></span>
+              </div>
               <select id="s-ai-provider" onchange="onAIProviderChange()">
                 <option value="claude">Claude (Anthropic)</option>
                 <option value="ollama">Ollama (local / self-hosted)</option>
@@ -950,30 +966,39 @@
                   <button class="btn btn-green" onclick="saveAIKey()" style="font-size:0.7rem">Save key</button>
                   <button class="btn" onclick="clearAIKey()" style="font-size:0.7rem">Clear</button>
                 </div>
-                <div style="font-size:0.68rem;color:var(--text2)" id="ai-server-key-note" style="display:none">
+                <div style="font-size:0.68rem;color:var(--text2);display:none" id="ai-server-key-note">
                   A server-level key is active. Your key will override it.
                 </div>
               </div>
               <div class="settings-row">
-                <span class="settings-label">Model</span>
+                <div style="display:flex;align-items:center;gap:0.4rem">
+                  <span class="settings-label">Model</span>
+                  <span id="scope-aiClaudeModel"></span>
+                </div>
                 <input type="text" id="s-ai-claude-model" placeholder="claude-sonnet-4-6"
                        style="width:180px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.45rem;color:var(--text);font-family:inherit;font-size:0.78rem"
-                       oninput="onAIModelChange()">
+                       oninput="onSettingChange()">
               </div>
             </div>
             <!-- Ollama fields -->
             <div id="ai-ollama-fields" style="display:none">
               <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:0.3rem">
-                <span class="settings-label">Endpoint URL</span>
+                <div style="display:flex;align-items:center;gap:0.4rem">
+                  <span class="settings-label">Endpoint URL</span>
+                  <span id="scope-aiOllamaEndpoint"></span>
+                </div>
                 <input type="text" id="s-ai-ollama-endpoint" placeholder="http://localhost:11434"
                        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.45rem;color:var(--text);font-family:inherit;font-size:0.78rem"
-                       oninput="onAIModelChange()">
+                       oninput="onSettingChange()">
               </div>
               <div class="settings-row">
-                <span class="settings-label">Model</span>
+                <div style="display:flex;align-items:center;gap:0.4rem">
+                  <span class="settings-label">Model</span>
+                  <span id="scope-aiOllamaModel"></span>
+                </div>
                 <input type="text" id="s-ai-ollama-model" placeholder="llama3"
                        style="width:120px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.45rem;color:var(--text);font-family:inherit;font-size:0.78rem"
-                       oninput="onAIModelChange()">
+                       oninput="onSettingChange()">
               </div>
               <div style="font-size:0.68rem;color:var(--text2);margin-top:0.25rem;line-height:1.5">
                 The browser calls Ollama directly. Set <code id="ollama-cors-hint" style="font-family:'JetBrains Mono',monospace">OLLAMA_ORIGINS=…</code> on your Ollama instance to enable CORS.
@@ -1067,7 +1092,10 @@
 
 <!-- Inline AI prompt dialog -->
 <dialog id="inlineAIDialog" style="width:min(680px,90vw);border-radius:8px;padding:1.2rem;background:var(--bg2);border:1px solid var(--border);color:var(--text)">
-  <h3 style="margin:0 0 0.75rem;font-size:0.9rem">Inline AI Prompt <span style="font-weight:400;color:var(--text2);font-size:0.78rem">(Ctrl+Shift+I)</span></h3>
+  <h3 style="margin:0 0 0.6rem;font-size:0.9rem">Inline AI Prompt <span style="font-weight:400;color:var(--text2);font-size:0.78rem">(Ctrl+Shift+I)</span></h3>
+  <div id="inline-ollama-repo-warning" class="ollama-repo-warning" style="display:none">
+    ⚠ Ollama endpoint set by this repo: <code id="inline-ollama-repo-endpoint-url"></code>
+  </div>
   <div style="margin-bottom:0.5rem">
     <textarea id="inline-prompt-input" rows="2"
               placeholder="What should the AI do with this text?"
@@ -1168,11 +1196,15 @@ const _SETTINGS_DEFAULTS = {
   theme: "dark", fontSize: 14, tabSize: 2, wordWrap: true,
   autoSave: true, autoSaveDelay: 120000, vimMode: false,
   commitMessage: "User saved.", previewFollowDebounce: 1000,
+  aiProvider: "claude",
+  aiClaudeModel: "",
+  aiOllamaModel: "",
+  aiOllamaEndpoint: "http://localhost:11434",
   inlineSystemPrompt: "You are an inline editing assistant for Quarto documents. Make targeted, precise edits. Return only the replacement text with no explanation.",
   chatSystemPrompt: "You are a writing and coding assistant for Quarto documents. Quarto is a scientific and technical publishing system built on Pandoc. Help the user write, edit, structure, and improve their Quarto documents. When showing code, use Quarto's fenced code chunk syntax (```{r}, ```{python}, etc.). Be concise. Format your responses in Markdown compatible with Quarto.",
 };
-// AI provider config (loaded separately — not stored in settings repo)
-let aiConfig = { provider: "claude", has_key: false, model: "", ollama_endpoint: "", server_key_active: false };
+// AI key config — only the has_key/server_key_active flags; provider/model/endpoint are now settings
+let aiConfig = { has_key: false, server_key_active: false };
 let settings = { ..._SETTINGS_DEFAULTS };
 let globalSettings = { ..._SETTINGS_DEFAULTS };
 let repoSettings = {};
@@ -1944,21 +1976,23 @@ window.sendAIMessage = async () => {
     ? cmView.state.doc.toString() : null;
 
   const systemPrompt = settings.chatSystemPrompt || _SETTINGS_DEFAULTS.chatSystemPrompt;
+  const provider = settings.aiProvider || "claude";
 
   try {
-    if (aiConfig.provider === "ollama") {
+    if (provider === "ollama") {
       await _streamOllama(
-        aiConfig.ollama_endpoint || "http://localhost:11434",
-        aiConfig.model || "llama3",
+        settings.aiOllamaEndpoint || "http://localhost:11434",
+        settings.aiOllamaModel || "llama3",
         systemPrompt,
         context ? `<document>\n${context}\n</document>\n\n${msg}` : msg,
         (chunk) => { reply.textContent += chunk; msgs.scrollTop = msgs.scrollHeight; },
       );
     } else {
+      const model = settings.aiClaudeModel || null;
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, context, system_prompt: systemPrompt }),
+        body: JSON.stringify({ message: msg, context, system_prompt: systemPrompt, provider, model }),
       });
       if (!res.ok) { reply.textContent = "Error: " + res.statusText; return; }
       await _streamAnthropic(res, (chunk) => { reply.textContent += chunk; msgs.scrollTop = msgs.scrollHeight; });
@@ -2070,6 +2104,17 @@ function applySettings() {
   document.getElementById("s-chatSystemPrompt").value = settings.chatSystemPrompt ?? _SETTINGS_DEFAULTS.chatSystemPrompt;
   document.getElementById("s-inlineSystemPrompt").value = settings.inlineSystemPrompt ?? _SETTINGS_DEFAULTS.inlineSystemPrompt;
 
+  // AI settings (provider/model/endpoint live in settings now)
+  const provider = settings.aiProvider || "claude";
+  document.getElementById("s-ai-provider").value = provider;
+  document.getElementById("s-ai-claude-model").value = settings.aiClaudeModel || "";
+  document.getElementById("s-ai-ollama-model").value = settings.aiOllamaModel || "";
+  document.getElementById("s-ai-ollama-endpoint").value = settings.aiOllamaEndpoint || "http://localhost:11434";
+  const isOllama = provider === "ollama";
+  document.getElementById("ai-claude-fields").style.display = isOllama ? "none" : "";
+  document.getElementById("ai-ollama-fields").style.display = isOllama ? "" : "none";
+  _updateOllamaRepoWarning();
+
   document.body.className = settings.theme === "light" ? "light" : "";
   document.getElementById("cm-host").style.fontSize = settings.fontSize + "px";
 }
@@ -2085,6 +2130,10 @@ window.onSettingChange = () => {
     vimMode: document.getElementById("s-vimMode").checked,
     commitMessage: document.getElementById("s-commitMessage").value || "User saved.",
     previewFollowDebounce: parseInt(document.getElementById("s-previewFollowDebounce").value, 10),
+    aiProvider: document.getElementById("s-ai-provider").value,
+    aiClaudeModel: document.getElementById("s-ai-claude-model").value.trim(),
+    aiOllamaModel: document.getElementById("s-ai-ollama-model").value.trim(),
+    aiOllamaEndpoint: document.getElementById("s-ai-ollama-endpoint").value.trim() || "http://localhost:11434",
     chatSystemPrompt: document.getElementById("s-chatSystemPrompt").value || _SETTINGS_DEFAULTS.chatSystemPrompt,
     inlineSystemPrompt: document.getElementById("s-inlineSystemPrompt").value || _SETTINGS_DEFAULTS.inlineSystemPrompt,
   };
@@ -2162,6 +2211,7 @@ function renderSettingScopes() {
       el.innerHTML = `<button class="scope-set-btn" onclick="setRepoOverride('${key}')" title="Pin this setting to the current repo">+ repo</button>`;
     }
   }
+  _updateOllamaRepoWarning();
 }
 
 window.createSettingsRepo = async () => {
@@ -2185,11 +2235,7 @@ async function loadAIConfig() {
 }
 
 function _applyAIConfig() {
-  document.getElementById("s-ai-provider").value = aiConfig.provider || "claude";
-  document.getElementById("s-ai-claude-model").value = aiConfig.model || "";
-  document.getElementById("s-ai-ollama-model").value = aiConfig.model || "";
-  document.getElementById("s-ai-ollama-endpoint").value = aiConfig.ollama_endpoint || "";
-
+  // Key status
   const keyStatus = document.getElementById("ai-key-status");
   keyStatus.textContent = aiConfig.has_key ? "✓ Key saved" : "No key stored";
   keyStatus.style.color = aiConfig.has_key ? "var(--green)" : "var(--text2)";
@@ -2197,52 +2243,43 @@ function _applyAIConfig() {
   const serverNote = document.getElementById("ai-server-key-note");
   if (serverNote) serverNote.style.display = aiConfig.server_key_active ? "" : "none";
 
-  const isOllama = aiConfig.provider === "ollama";
-  document.getElementById("ai-claude-fields").style.display = isOllama ? "none" : "";
-  document.getElementById("ai-ollama-fields").style.display = isOllama ? "" : "none";
-
   // Show/hide chat UI vs configure prompt
-  const hasAI = aiConfig.has_key;
+  const hasAI = aiConfig.has_key || (settings.aiProvider === "ollama");
   document.getElementById("ai-no-config").style.display = hasAI ? "none" : "";
   document.getElementById("ai-chat-ui").style.display = hasAI ? "" : "none";
 }
 
-window.onAIProviderChange = () => {
-  const provider = document.getElementById("s-ai-provider").value;
-  aiConfig.provider = provider;
-  const isOllama = provider === "ollama";
-  document.getElementById("ai-claude-fields").style.display = isOllama ? "none" : "";
-  document.getElementById("ai-ollama-fields").style.display = isOllama ? "" : "none";
-  _saveAIProviderAndModel();
-};
+function _updateOllamaRepoWarning() {
+  const isOllama = settings.aiProvider === "ollama";
+  const endpointIsRepo = "aiOllamaEndpoint" in repoSettings;
+  const show = isOllama && endpointIsRepo;
+  const endpoint = settings.aiOllamaEndpoint || "";
 
-window.onAIModelChange = () => { _saveAIProviderAndModel(); };
-
-function _saveAIProviderAndModel() {
-  const provider = document.getElementById("s-ai-provider").value;
-  const model = provider === "ollama"
-    ? document.getElementById("s-ai-ollama-model").value.trim()
-    : document.getElementById("s-ai-claude-model").value.trim();
-  const endpoint = document.getElementById("s-ai-ollama-endpoint").value.trim();
-  aiConfig.provider = provider;
-  aiConfig.model = model;
-  aiConfig.ollama_endpoint = endpoint;
-  fetch("/api/ai/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, model: model || null, ollama_endpoint: endpoint || null }),
-  }).catch(() => {});
+  for (const [warnId, urlId] of [
+    ["ollama-repo-endpoint-warning", "ollama-repo-endpoint-url"],
+    ["inline-ollama-repo-warning", "inline-ollama-repo-endpoint-url"],
+  ]) {
+    const warn = document.getElementById(warnId);
+    const urlEl = document.getElementById(urlId);
+    if (!warn) continue;
+    warn.style.display = show ? "" : "none";
+    if (urlEl) urlEl.textContent = endpoint;
+  }
 }
+
+window.onAIProviderChange = () => {
+  // Update the settings object immediately so _updateOllamaRepoWarning has the right provider
+  onSettingChange();
+};
 
 window.saveAIKey = async () => {
   const key = document.getElementById("ai-key-input").value.trim();
   if (!key) return;
   const provider = document.getElementById("s-ai-provider").value;
-  const model = document.getElementById("s-ai-claude-model").value.trim() || null;
   const res = await fetch("/api/ai/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, api_key: key, model }),
+    body: JSON.stringify({ provider, api_key: key }),
   });
   if (res.ok) {
     document.getElementById("ai-key-input").value = "";
@@ -2303,17 +2340,18 @@ window.sendInlinePrompt = async () => {
 
   const selection = document.getElementById("inline-selection-text").textContent || null;
   const systemPrompt = settings.inlineSystemPrompt || _SETTINGS_DEFAULTS.inlineSystemPrompt;
+  const provider = settings.aiProvider || "claude";
 
   try {
     let text = "";
-    if (aiConfig.provider === "ollama") {
-      const base = (aiConfig.ollama_endpoint || "http://localhost:11434").replace(/\/$/, "");
+    if (provider === "ollama") {
+      const base = (settings.aiOllamaEndpoint || "http://localhost:11434").replace(/\/$/, "");
       const userContent = selection ? `${prompt}\n\n<selection>\n${selection}\n</selection>` : prompt;
       const res = await fetch(`${base}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: aiConfig.model || "llama3",
+          model: settings.aiOllamaModel || "llama3",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userContent },
@@ -2324,10 +2362,11 @@ window.sendInlinePrompt = async () => {
       const data = await res.json();
       text = data.choices?.[0]?.message?.content || "";
     } else {
+      const model = settings.aiClaudeModel || null;
       const res = await fetch("/api/ai/inline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, selection, system_prompt: systemPrompt }),
+        body: JSON.stringify({ prompt, selection, system_prompt: systemPrompt, provider, model }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
