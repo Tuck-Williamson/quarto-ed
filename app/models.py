@@ -36,3 +36,16 @@ class Session(Base):
     last_seen: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class UserAIConfig(Base):
+    __tablename__ = "user_ai_config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)   # "claude" | "ollama"
+    api_key_encrypted: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ollama_endpoint: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    user: Mapped["User"] = relationship()

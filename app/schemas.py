@@ -42,9 +42,23 @@ class CommitRequest(BaseModel):
     message: str = "User saved."
 
 
+class AIKeySaveRequest(BaseModel):
+    provider: str               # "claude" | "ollama"
+    api_key: str | None = None
+    model: str | None = None
+    ollama_endpoint: str | None = None
+
+
+class AIInlineRequest(BaseModel):
+    prompt: str
+    selection: str | None = None
+    system_prompt: str | None = None
+
+
 class AIChatRequest(BaseModel):
     message: str
     context: str | None = None
+    system_prompt: str | None = None
 
 
 class PreviewRestartRequest(BaseModel):

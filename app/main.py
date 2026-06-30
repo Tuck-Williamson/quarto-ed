@@ -8,7 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import __version__
 from .auth import router as auth_router
 from .database import engine, get_db_session
-from .models import Base, Session
+from .models import Base, Session, UserAIConfig  # noqa: F401 — ensures table is registered
 from .proxy import router as proxy_router
 
 # Group-writable by default: /workspace dirs are setgid to a per-user sandbox
