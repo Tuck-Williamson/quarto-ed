@@ -369,10 +369,12 @@
     }
 
     /* ── AI chat ── */
+    #ai-chat-ui { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     .ai-messages {
-      flex: 1; overflow-y: auto; padding: 0.875rem;
+      flex: 1; overflow-y: auto; padding: 0.875rem; min-height: 0;
       display: flex; flex-direction: column; gap: 0.75rem;
     }
+    .ai-msg-wrap { display: flex; flex-direction: column; gap: 0.2rem; }
     .ai-msg { font-size: 0.79rem; line-height: 1.6; }
     .ai-msg.user { color: var(--accent); font-weight: 500; }
     .ai-msg.assistant { color: var(--text); white-space: pre-wrap; }
@@ -385,6 +387,14 @@
       overflow-x: auto; margin: 0.4rem 0; border: 1px solid var(--border);
       font-family: "JetBrains Mono", monospace;
     }
+    .ai-copy-btn {
+      align-self: flex-start; font-size: 0.6rem; font-family: inherit;
+      color: var(--text2); background: none; border: 1px solid var(--border);
+      border-radius: 3px; padding: 0.06rem 0.32rem; cursor: pointer;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .ai-msg-wrap:hover .ai-copy-btn { opacity: 1; }
+    .ai-copy-btn.copied { color: var(--green); border-color: var(--green); }
     .ai-input-bar {
       padding: 0.5rem; border-top: 1px solid var(--border);
       display: flex; flex-direction: column; gap: 0.4rem; flex-shrink: 0;
@@ -1958,6 +1968,29 @@ window.aiKeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAIMessage(); }
 };
 
+function _makeAIMsgWrap(msgEl, rawText) {
+  const wrap = document.createElement("div");
+  wrap.className = "ai-msg-wrap";
+  if (rawText !== undefined) wrap.dataset.text = rawText;
+  const btn = document.createElement("button");
+  btn.className = "ai-copy-btn";
+  btn.textContent = "Copy";
+  btn.onclick = () => copyAIMsg(btn);
+  wrap.appendChild(msgEl);
+  wrap.appendChild(btn);
+  return wrap;
+}
+
+window.copyAIMsg = (btn) => {
+  const wrap = btn.closest(".ai-msg-wrap");
+  const text = wrap.dataset.text ?? wrap.querySelector(".ai-msg").textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "✓ Copied";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1500);
+  }).catch(() => {});
+};
+
 window.sendAIMessage = async () => {
   const input = document.getElementById("ai-input");
   const msg = input.value.trim();
@@ -1965,11 +1998,21 @@ window.sendAIMessage = async () => {
   input.value = "";
 
   const msgs = document.getElementById("ai-messages");
-  msgs.insertAdjacentHTML("beforeend", `<div class="ai-msg user">You: ${escapeHtml(msg)}</div>`);
+
+  // User bubble
+  const userEl = document.createElement("div");
+  userEl.className = "ai-msg user";
+  userEl.textContent = "You: " + msg;
+  msgs.appendChild(_makeAIMsgWrap(userEl, msg));
+
+  // Assistant bubble
   const reply = document.createElement("div");
   reply.className = "ai-msg assistant";
-  msgs.appendChild(reply);
-  msgs.scrollTop = msgs.scrollHeight;
+  const replyWrap = _makeAIMsgWrap(reply);
+  msgs.appendChild(replyWrap);
+
+  const scrollToBottom = () => { msgs.scrollTop = msgs.scrollHeight; };
+  scrollToBottom();
 
   const includeCtx = document.getElementById("ai-context")?.checked;
   const context = includeCtx && currentFile && cmView
@@ -1985,7 +2028,7 @@ window.sendAIMessage = async () => {
         settings.aiOllamaModel || "llama3",
         systemPrompt,
         context ? `<document>\n${context}\n</document>\n\n${msg}` : msg,
-        (chunk) => { reply.textContent += chunk; msgs.scrollTop = msgs.scrollHeight; },
+        (chunk) => { reply.textContent += chunk; scrollToBottom(); },
       );
     } else {
       const model = settings.aiClaudeModel || null;
@@ -1995,7 +2038,7 @@ window.sendAIMessage = async () => {
         body: JSON.stringify({ message: msg, context, system_prompt: systemPrompt, provider, model }),
       });
       if (!res.ok) { reply.textContent = "Error: " + res.statusText; return; }
-      await _streamAnthropic(res, (chunk) => { reply.textContent += chunk; msgs.scrollTop = msgs.scrollHeight; });
+      await _streamAnthropic(res, (chunk) => { reply.textContent += chunk; scrollToBottom(); });
     }
   } catch (e) {
     reply.textContent = "Error: " + e.message;
@@ -2117,6 +2160,9 @@ function applySettings() {
 
   document.body.className = settings.theme === "light" ? "light" : "";
   document.getElementById("cm-host").style.fontSize = settings.fontSize + "px";
+
+  // Refresh AI panel visibility — provider change can unlock the chat UI
+  _applyAIConfig();
 }
 
 window.onSettingChange = () => {
@@ -2244,9 +2290,9 @@ function _applyAIConfig() {
   if (serverNote) serverNote.style.display = aiConfig.server_key_active ? "" : "none";
 
   // Show/hide chat UI vs configure prompt
-  const hasAI = aiConfig.has_key || (settings.aiProvider === "ollama");
+  const hasAI = aiConfig.has_key || aiConfig.server_key_active || (settings.aiProvider === "ollama");
   document.getElementById("ai-no-config").style.display = hasAI ? "none" : "";
-  document.getElementById("ai-chat-ui").style.display = hasAI ? "" : "none";
+  document.getElementById("ai-chat-ui").style.display = hasAI ? "flex" : "none";
 }
 
 function _updateOllamaRepoWarning() {
