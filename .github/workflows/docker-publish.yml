@@ -103,7 +103,7 @@ jobs:
         run: docker build -f Dockerfile.test --build-arg BASE_IMAGE=app:ci -t app:test .
 
       - name: Run tests
-        run: docker run --rm app:test
+        run: docker run --rm -e CI app:test
 
       - name: Cache Trivy Vulnerability DB
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
