@@ -169,6 +169,13 @@ def git_workspace(tmp_path):
         capture_output=True, text=True, check=True,
     ).stdout.strip()
     _run("git", "-C", str(workspace), "push", "--set-upstream", "origin", branch)
+    # Set origin/HEAD so _get_default_branch() resolves without a network call.
+    _run("git", "-C", str(workspace), "remote", "set-head", "origin", branch)
+
+    # Set up the per-server autosave branch so sync_workspace() has it.
+    from app.proxy import _AUTOSAVE_BRANCH
+    _run("git", "-C", str(workspace), "checkout", "-b", _AUTOSAVE_BRANCH)
+    _run("git", "-C", str(workspace), "push", "-u", "origin", _AUTOSAVE_BRANCH)
 
     return workspace
 

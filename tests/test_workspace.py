@@ -1,4 +1,5 @@
 """Tests for the workspace load and sync API."""
+import subprocess
 from pathlib import Path
 
 
@@ -54,10 +55,10 @@ async def test_sync_commits_new_file(git_auth_client):
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
-    # Verify the file was committed
-    import subprocess
+    # The autosave branch should have the direct commit message.
+    from app.proxy import _AUTOSAVE_BRANCH
     log = subprocess.run(
-        ["git", "-C", str(workspace), "log", "--oneline", "-1"],
+        ["git", "-C", str(workspace), "log", _AUTOSAVE_BRANCH, "--oneline", "-1"],
         capture_output=True, text=True, check=True,
     )
     assert "add new document" in log.stdout
@@ -83,9 +84,76 @@ async def test_sync_custom_commit_message(git_auth_client):
     )
     assert resp.status_code == 200
 
-    import subprocess
+    from app.proxy import _AUTOSAVE_BRANCH
     log = subprocess.run(
-        ["git", "-C", str(workspace), "log", "--oneline", "-1"],
+        ["git", "-C", str(workspace), "log", _AUTOSAVE_BRANCH, "--oneline", "-1"],
         capture_output=True, text=True, check=True,
     )
     assert "feat: add doc" in log.stdout
+
+
+# ---------------------------------------------------------------------------
+# Autosave branch behavior
+# ---------------------------------------------------------------------------
+
+async def test_sync_creates_merge_commit_on_main(git_auth_client):
+    """Sync must produce a merge commit on the default branch with the Sync: prefix."""
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+    (workspace / "doc.qmd").write_text("# Hello\n")
+
+    resp = await client.post(
+        "/api/workspace/sync", json={"message": "my work"}
+    )
+    assert resp.status_code == 200
+
+    default_branch = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--abbrev-ref", "origin/HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip().replace("origin/", "") or "main"
+    log = subprocess.run(
+        ["git", "-C", str(workspace), "log", default_branch, "--oneline", "-1"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert "Sync: my work" in log
+
+
+async def test_sync_returns_to_autosave_branch(git_auth_client):
+    """After sync the working tree must be back on the autosave branch."""
+    from app.proxy import _AUTOSAVE_BRANCH
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+    (workspace / "doc.qmd").write_text("content")
+
+    await client.post("/api/workspace/sync", json={"message": "test"})
+
+    branch = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert branch == _AUTOSAVE_BRANCH
+
+
+async def test_sync_multiple_times(git_auth_client):
+    """Two consecutive syncs should both succeed."""
+    client, sess = git_auth_client
+    workspace = Path(sess.workspace_path)
+
+    (workspace / "a.qmd").write_text("first")
+    r1 = await client.post("/api/workspace/sync", json={"message": "first sync"})
+    assert r1.status_code == 200
+
+    (workspace / "b.qmd").write_text("second")
+    r2 = await client.post("/api/workspace/sync", json={"message": "second sync"})
+    assert r2.status_code == 200
+
+    default_branch = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--abbrev-ref", "origin/HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip().replace("origin/", "") or "main"
+    log = subprocess.run(
+        ["git", "-C", str(workspace), "log", default_branch, "--oneline", "-2"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "Sync: second sync" in log
+    assert "Sync: first sync" in log

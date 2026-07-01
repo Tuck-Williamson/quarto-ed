@@ -1,13 +1,20 @@
 import asyncio
+import fcntl
 import io
 import json
+import logging
 import mimetypes
 import os
+import pty
 import re
 import shutil
 import socket
+import struct
 import subprocess
+import termios
 import zipfile
+
+_log = logging.getLogger(__name__)
 
 import httpx
 import websockets
@@ -75,6 +82,31 @@ _GIT_SHA = os.environ.get("GIT_SHA", "unknown")
 _ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
 
+# ── Per-server autosave branch ───────────────────────────────────────────────
+
+def _make_server_id() -> str:
+    raw = os.environ.get("DYNO") or socket.gethostname()
+    return re.sub(r"[^a-zA-Z0-9]", "-", raw).lower()[:40]
+
+_SERVER_ID = _make_server_id()
+_AUTOSAVE_BRANCH = f"quarto-ed-{_SERVER_ID}"
+
+# ── Terminal sandbox warning ─────────────────────────────────────────────────
+
+_ALLOWED_USERS_RAW = os.environ.get("ALLOWED_GITHUB_USERS", "").strip()
+# Warn when not sandboxed AND multiple users are allowed (empty = everyone, or 2+ listed)
+_TERMINAL_SANDBOX_WARNING = (
+    not sandbox.sandboxing_available() and
+    (not _ALLOWED_USERS_RAW or _ALLOWED_USERS_RAW.count(",") >= 1)
+)
+
+# Env vars forwarded to terminal shells — same allowlist principle as quarto preview.
+_TERMINAL_ENV_ALLOWLIST = frozenset({
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES",
+    "USER", "USERNAME", "LOGNAME",
+    "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+})
+
 _SETTINGS_DEFAULTS = {
     "theme": "dark",
     "fontSize": 14,
@@ -112,6 +144,13 @@ _preview_paths: dict[int, str] = {}
 _preview_locks: dict[int, asyncio.Lock] = {}
 _LOG_MAX_LINES = 500
 
+# ── Terminal process state (one shell per user) ──────────────────────────────
+
+_terminal_fds: dict[int, int] = {}             # user_id → pty master fd
+_terminal_procs: dict[int, subprocess.Popen] = {}  # user_id → bash process
+_terminal_workspace: dict[int, str] = {}       # user_id → workspace path at spawn time
+_terminal_gen: dict[int, int] = {}             # user_id → connection generation (race guard)
+
 
 async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str = "") -> None:
     try:
@@ -123,6 +162,122 @@ async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str =
                 del buf[:-_LOG_MAX_LINES]
     except Exception:
         pass
+
+
+def _set_winsize(fd: int, cols: int, rows: int) -> None:
+    """Set PTY window size (cols × rows)."""
+    size = struct.pack("HHHH", rows, cols, 0, 0)
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, size)
+    except OSError:
+        pass
+
+
+def _kill_terminal(user_id: int) -> None:
+    proc = _terminal_procs.pop(user_id, None)
+    fd = _terminal_fds.pop(user_id, None)
+    _terminal_workspace.pop(user_id, None)
+    _terminal_gen.pop(user_id, None)
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            proc.kill()  # belt-and-suspenders; non-blocking
+        except OSError:
+            pass
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _spawn_terminal(user_id: int, workspace_path: str, cols: int = 80, rows: int = 24) -> int:
+    """Spawn a bash shell inside workspace_path, return the pty master fd."""
+    _kill_terminal(user_id)
+    master_fd, slave_fd = pty.openpty()
+    _set_winsize(master_fd, cols, rows)
+    env = {k: v for k, v in os.environ.items() if k in _TERMINAL_ENV_ALLOWLIST}
+    env["TERM"] = "xterm-256color"
+    try:
+        proc = subprocess.Popen(
+            ["/bin/bash", "--login"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=workspace_path,
+            env=env,
+            close_fds=True,
+        )
+    except Exception:
+        os.close(master_fd)
+        raise
+    finally:
+        os.close(slave_fd)
+    _terminal_fds[user_id] = master_fd
+    _terminal_procs[user_id] = proc
+    _terminal_workspace[user_id] = workspace_path
+    return master_fd
+
+
+async def _setup_autosave_branch(workspace_path: str) -> None:
+    """After clone/pull, ensure the per-server autosave branch is checked out."""
+    env_no_prompt = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def git(*args, **kw):
+        return asyncio.create_subprocess_exec(
+            "git", "-C", workspace_path, *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            **kw,
+        )
+
+    # Skip for empty repos (no commits yet)
+    chk = await asyncio.create_subprocess_exec(
+        "git", "-C", workspace_path, "rev-parse", "HEAD",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await chk.wait()
+    if chk.returncode != 0:
+        return
+
+    # Check if local branch already exists
+    local_chk = await asyncio.create_subprocess_exec(
+        "git", "-C", workspace_path, "rev-parse", "--verify", _AUTOSAVE_BRANCH,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await local_chk.wait()
+
+    if local_chk.returncode == 0:
+        p = await git("checkout", _AUTOSAVE_BRANCH)
+        await p.wait()
+        return
+
+    # Check if remote branch exists
+    ls = await asyncio.create_subprocess_exec(
+        "git", "-C", workspace_path, "ls-remote", "--heads", "origin", _AUTOSAVE_BRANCH,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        env=env_no_prompt,
+    )
+    out, _ = await ls.communicate()
+
+    if out.strip():
+        p = await git("fetch", "origin", _AUTOSAVE_BRANCH, env=env_no_prompt)
+        await p.wait()
+        p = await git("checkout", "-b", _AUTOSAVE_BRANCH, f"origin/{_AUTOSAVE_BRANCH}")
+        await p.wait()
+    else:
+        p = await git("checkout", "-b", _AUTOSAVE_BRANCH)
+        await p.wait()
+        p = await git("push", "-u", "origin", _AUTOSAVE_BRANCH, env=env_no_prompt)
+        await p.wait()
+        if p.returncode != 0:
+            _log.warning(
+                "_setup_autosave_branch: push failed (rc=%d); branch has no remote tracking ref",
+                p.returncode,
+            )
 
 
 def _quarto_env(user_id: int, python_bin: str | None = None) -> dict:
@@ -490,6 +645,7 @@ async def editor(request: Request):
             "quarto_version": _QUARTO_VERSION,
             "app_version": __version__,
             "git_sha": _GIT_SHA,
+            "terminal_sandbox_warning": _TERMINAL_SANDBOX_WARNING,
         },
     )
 
@@ -549,27 +705,39 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
     os.makedirs(workspace_path, exist_ok=True)
 
     if os.path.isdir(os.path.join(workspace_path, ".git")):
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", workspace_path, "pull",
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        # Switch to main before pulling so we always update the primary branch.
+        # If the checkout fails (dirty working tree on autosave branch between
+        # syncs), skip the pull and continue on the current branch.
+        chk = await asyncio.create_subprocess_exec(
+            "git", "-C", workspace_path, "checkout", "main",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            stderr_str = _redact(stderr.decode(), access_token)
-            if "would be overwritten" in stderr_str or "Please commit" in stderr_str:
-                stat = await asyncio.create_subprocess_exec(
-                    "git", "-C", workspace_path, "status", "--porcelain",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                )
-                stat_out, _ = await stat.communicate()
-                files = [ln[3:] for ln in stat_out.decode().splitlines() if ln.strip()]
-                raise HTTPException(
-                    status_code=409,
-                    detail={"type": "local_changes", "files": files},
-                )
-            raise HTTPException(status_code=400, detail=f"git pull failed: {stderr_str}")
+        await chk.wait()
+
+        if chk.returncode == 0:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", workspace_path, "pull",
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                stderr_str = _redact(stderr.decode(), access_token)
+                if "would be overwritten" in stderr_str or "Please commit" in stderr_str:
+                    stat = await asyncio.create_subprocess_exec(
+                        "git", "-C", workspace_path, "status", "--porcelain",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    stat_out, _ = await stat.communicate()
+                    files = [ln[3:] for ln in stat_out.decode().splitlines() if ln.strip()]
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"type": "local_changes", "files": files},
+                    )
+                raise HTTPException(status_code=400, detail=f"git pull failed: {stderr_str}")
+
+        await _setup_autosave_branch(workspace_path)
     else:
         clone_url = (
             f"https://oauth2:{access_token}@github.com/"
@@ -593,6 +761,8 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
             p = await asyncio.create_subprocess_exec(*cmd)
             await p.wait()
 
+        await _setup_autosave_branch(workspace_path)
+
     async with get_db_session() as db:
         await db.execute(
             update(Session)
@@ -611,6 +781,28 @@ async def load_workspace(request: Request, body: WorkspaceLoadRequest):
     return {"workspace_path": workspace_path}
 
 
+async def _get_default_branch(workspace_path: str) -> str:
+    """Return the remote default branch name without a network call."""
+    p = await asyncio.create_subprocess_exec(
+        "git", "-C", workspace_path, "rev-parse", "--abbrev-ref", "origin/HEAD",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await p.communicate()
+    branch = stdout.decode().strip()
+    if branch.startswith("origin/"):
+        return branch[len("origin/"):]
+    # Fallback: check which conventional branch name exists on the remote.
+    for candidate in ("main", "master"):
+        p = await asyncio.create_subprocess_exec(
+            "git", "-C", workspace_path, "rev-parse", "--verify", f"origin/{candidate}",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await p.wait()
+        if p.returncode == 0:
+            return candidate
+    return "main"
+
+
 @router.post("/api/workspace/sync")
 async def sync_workspace(request: Request, body: SyncRequest):
     sess = await get_current_session(request)
@@ -620,19 +812,77 @@ async def sync_workspace(request: Request, body: SyncRequest):
         raise HTTPException(status_code=400, detail="No workspace loaded")
 
     path = sess.workspace_path
-    for cmd in [
-        ["git", "-C", path, "add", "-A"],
-        ["git", "-C", path, "commit", "-m", body.message],
-        ["git", "-C", path, "push"],
-    ]:
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    async def _git(*args: str, allow_nothing_to_commit: bool = False) -> bytes:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            "git", "-C", path, *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         stdout, stderr = await proc.communicate()
-        if proc.returncode != 0 and b"nothing to commit" not in stdout + stderr:
-            raise HTTPException(status_code=500, detail=f"Command failed: {stderr.decode()}")
+        combined = stdout + stderr
+        if proc.returncode != 0:
+            if allow_nothing_to_commit and b"nothing to commit" in combined:
+                return combined
+            msg = re.sub(
+                r'https?://[^@\s]*@', 'https://***@',
+                combined.decode(errors='replace'),
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"git {args[0]} failed: {msg}",
+            )
+        return combined
+
+    default_branch = await _get_default_branch(path)
+
+    # 1. Stage and commit everything to the autosave branch.
+    await _git("add", "-A")
+    await _git("commit", "-m", body.message, allow_nothing_to_commit=True)
+
+    # 2. Push the autosave branch so it survives dyno restarts.
+    await _git("push", "origin", _AUTOSAVE_BRANCH)
+
+    # 3. Fetch all remotes, bring local default branch up to date, then merge autosave → default.
+    await _git("fetch", "origin")
+    await _git("checkout", default_branch)
+    # Fast-forward local default branch to match remote (no-op if already current).
+    ff_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", path, "merge", "--ff-only", f"origin/{default_branch}",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env,
+    )
+    await ff_proc.wait()  # non-zero means local/remote diverged; push will surface it
+
+    merge_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", path, "merge", "--no-ff", _AUTOSAVE_BRANCH,
+        "-m", f"Sync: {body.message}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    m_out, m_err = await merge_proc.communicate()
+    if merge_proc.returncode != 0:
+        abort = await asyncio.create_subprocess_exec(
+            "git", "-C", path, "merge", "--abort",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env,
+        )
+        await abort.wait()
+        await _git("checkout", _AUTOSAVE_BRANCH)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "type": "merge_conflict",
+                "message": (m_out + m_err).decode(errors="replace"),
+            },
+        )
+
+    # 4. Push default branch and return to the autosave branch.
+    try:
+        await _git("push", "origin", default_branch)
+    finally:
+        await _git("checkout", _AUTOSAVE_BRANCH)
 
     return {"status": "ok"}
 
@@ -1395,3 +1645,114 @@ async def preview_ws(websocket: WebSocket, path: str):
 
     except _closed:
         pass
+
+
+# ── Terminal WebSocket ────────────────────────────────────────────────────────
+
+@router.websocket("/api/terminal/ws")
+async def terminal_ws(websocket: WebSocket):
+    token = websocket.session.get("session_token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+
+    async with get_db_session() as db:
+        result = await db.execute(select(Session).where(Session.session_token == token))
+        sess = result.scalar_one_or_none()
+
+    if not sess or not sess.workspace_path:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+
+    user_id = sess.user_id
+
+    # Reuse an already-running terminal only when it's alive AND in the same workspace.
+    existing_alive = (
+        user_id in _terminal_fds
+        and _terminal_procs.get(user_id) is not None
+        and _terminal_procs[user_id].poll() is None
+        and _terminal_workspace.get(user_id) == sess.workspace_path
+    )
+    if not existing_alive:
+        try:
+            master_fd = _spawn_terminal(user_id, sess.workspace_path)
+        except Exception as exc:
+            await websocket.send_text(f"\r\n\x1b[31m[terminal error: {exc}]\x1b[0m\r\n")
+            await websocket.close(code=1011)
+            return
+    else:
+        master_fd = _terminal_fds[user_id]
+
+    # Bump generation so an older connection's finally-remove_reader won't evict our reader.
+    gen = (_terminal_gen.get(user_id, 0) + 1)
+    _terminal_gen[user_id] = gen
+
+    loop = asyncio.get_running_loop()
+    output_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def _on_pty_readable():
+        try:
+            data = os.read(master_fd, 4096)
+            output_queue.put_nowait(data)
+        except OSError:
+            output_queue.put_nowait(None)
+            loop.remove_reader(master_fd)
+
+    loop.add_reader(master_fd, _on_pty_readable)
+
+    async def pty_to_ws():
+        try:
+            while True:
+                chunk = await output_queue.get()
+                if chunk is None:
+                    break
+                await websocket.send_bytes(chunk)
+        except Exception:
+            pass
+
+    async def ws_to_pty():
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                raw: bytes = msg.get("bytes") or (msg.get("text") or "").encode()
+                if not raw:
+                    continue
+                # Text frames carry JSON control messages (resize); binary frames carry keystrokes.
+                if msg.get("text"):
+                    try:
+                        obj = json.loads(raw)
+                        if obj.get("type") == "resize":
+                            _set_winsize(
+                                master_fd,
+                                int(obj.get("cols", 80)),
+                                int(obj.get("rows", 24)),
+                            )
+                        continue
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                try:
+                    os.write(master_fd, raw)
+                except OSError:
+                    break
+        except Exception:
+            pass
+
+    try:
+        tasks = [
+            asyncio.ensure_future(pty_to_ws()),
+            asyncio.ensure_future(ws_to_pty()),
+        ]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, *done, return_exceptions=True)
+    finally:
+        # Only remove the reader if we're still the current connection for this user.
+        # A reconnect that arrived during the await above bumps _terminal_gen, so this
+        # guard prevents us from evicting the new connection's reader.
+        if _terminal_gen.get(user_id) == gen:
+            loop.remove_reader(master_fd)
