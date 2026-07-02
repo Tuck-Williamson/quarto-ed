@@ -1760,11 +1760,38 @@ window.runEditorCommand = (id) => {
   cmView.focus();
 };
 
+// ── App-level keybindings ─────────────────────────────────────────────────
+// Single source of truth for both the keydown handler and the Quick Help dialog.
+// eKey: the value of e.key when Ctrl is held; eKeyAlt: alternate e.key some
+// browsers report for the same physical key (e.g. Shift+Period → ">" or ".").
+// shift: whether Shift must also be held.
+const APP_KEYBINDINGS = [
+  { label: "Panels & navigation", items: [
+    { key: "Ctrl-'",       eKey: "'",  shift: false, label: "Preview",            desc: "Switch to the Preview panel",                         action: () => switchPanel("preview") },
+    { key: "Ctrl->",       eKey: ">",  shift: true,  label: "AI",                 desc: "Switch to the AI panel and focus the input",          action: () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }, eKeyAlt: "." },
+    { key: "Ctrl-;",       eKey: ";",  shift: false, label: "Terminal",           desc: "Switch to the Terminal panel",                        action: () => { switchPanel("terminal"); initTerminal(); } },
+    { key: "Ctrl-:",       eKey: ":",  shift: true,  label: "Logs",               desc: "Switch to the Logs panel",                            action: () => switchPanel("logs") },
+    { key: "Ctrl-,",       eKey: ",",  shift: false, label: "Settings",           desc: "Switch to the Settings panel",                        action: () => switchPanel("settings") },
+    { key: "Ctrl-.",       eKey: ".",  shift: false, label: "Focus editor",       desc: "Move keyboard focus to the editor",                   action: () => cmView?.focus() },
+    { key: "Ctrl-l",       eKey: "l",  shift: false, label: "Focus file pane",    desc: "Move focus to the file browser, expanding if hidden", action: () => { if (document.getElementById("sidebar").classList.contains("collapsed")) toggleSidebar(); (document.querySelector(".tree-item.active") || document.querySelector(".tree-item"))?.focus(); } },
+    { key: "Ctrl-h",       eKey: "h",  shift: false, label: "Toggle file pane",   desc: "Show or hide the file browser",                       action: () => toggleSidebar() },
+    { key: "Ctrl-Shift-H", eKey: "H",  shift: true,  label: "Toggle right pane",  desc: "Show or hide the right panel",                        action: () => toggleRightPanel() },
+    { key: "Ctrl-?",       eKey: "?",  shift: true,  label: "Quick help",         desc: "Open this keybinding reference",                      action: () => openQuickHelp() },
+  ]},
+];
+
 window.openQuickHelp = () => {
   document.getElementById("viewMenu").classList.remove("open");
   const content = document.getElementById("quickHelpContent");
   if (!content.dataset.rendered) {
     let html = "";
+    APP_KEYBINDINGS.forEach(group => {
+      html += `<h4>${group.label}</h4><table>`;
+      group.items.forEach(item => {
+        html += `<tr><td class="key">${fmtKey(item)}</td><td>${item.label}</td><td class="desc">${item.desc}</td></tr>`;
+      });
+      html += `</table>`;
+    });
     EDIT_COMMAND_GROUPS.forEach(group => {
       html += `<h4>${group.label}</h4><table>`;
       group.items.forEach(item => {
@@ -2825,30 +2852,17 @@ window.restartTerminal = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (!e.ctrlKey || e.altKey || e.metaKey) return;
-  const inEditor = cmView && cmView.dom.contains(document.activeElement);
-  let action = null;
-  if (e.shiftKey) {
-    switch (e.key) {
-      case "H": action = () => toggleRightPanel(); break;
-      case ".": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
-      case ">": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
-    }
-  } else {
-    switch (e.key) {
-      case ",": action = () => switchPanel("settings"); break;
-      case "'": action = () => switchPanel("preview"); break;
-      // Ctrl+. focuses the editor; no-op if already there.
-      case ".": if (!inEditor) action = () => cmView?.focus(); break;
-      case "[": action = () => { switchPanel("terminal"); initTerminal(); }; break;
-      case "]": action = () => switchPanel("logs"); break;
-      case "h": action = () => toggleSidebar(); break;
-      case "l": action = () => {
-        if (document.getElementById("sidebar").classList.contains("collapsed")) toggleSidebar();
-        (document.querySelector(".tree-item.active") || document.querySelector(".tree-item"))?.focus();
-      }; break;
+  for (const group of APP_KEYBINDINGS) {
+    for (const binding of group.items) {
+      if (!!binding.shift !== e.shiftKey) continue;
+      // if (e.key !== binding.eKey && e.key !== (binding.eKeyAlt ?? null)) continue;
+      if (e.key !== binding.eKey) continue;
+      e.preventDefault();
+      e.stopPropagation();
+      binding.action();
+      return;
     }
   }
-  if (action) { e.preventDefault(); e.stopPropagation(); action(); }
 }, true);
 
 document.addEventListener("keydown", (e) => {
