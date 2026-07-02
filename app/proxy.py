@@ -203,7 +203,7 @@ def _spawn_terminal(user_id: int, workspace_path: str, cols: int = 80, rows: int
     env["TERM"] = "xterm-256color"
     try:
         proc = subprocess.Popen(
-            ["/bin/bash", "--login"],
+            ["/bin/bash", "-i"],
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,

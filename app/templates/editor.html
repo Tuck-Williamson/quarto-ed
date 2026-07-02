@@ -203,6 +203,7 @@
       transition: background 0.08s;
     }
     .tree-item:hover { background: var(--bg3); }
+    .tree-item:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
     .tree-item.active { background: rgba(232,151,74,0.1); color: var(--accent); }
     .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.68rem; }
     .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -604,6 +605,7 @@
       padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
+    .term-toolbar .btn { color: #ede8e2; }
     #terminal-container { flex: 1; overflow: hidden; background: #1a1a1a; padding: 4px; }
     #panel-terminal { background: #1a1a1a; }
 
@@ -1480,6 +1482,9 @@ function renderTree(nodes, container) {
       wrapper.className = "tree-dir";
       const header = document.createElement("div");
       header.className = "tree-item" + (node.ignored ? " ignored" : "");
+      header.tabIndex = 0;
+      header.dataset.path = node.path;
+      header.dataset.type = "dir";
       header.innerHTML = `<span class="icon">▸</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}/</span>`;
       const children = document.createElement("div");
       children.className = "tree-children hidden";
@@ -1497,6 +1502,9 @@ function renderTree(nodes, container) {
       const ext = node.name.slice(node.name.lastIndexOf(".")).toLowerCase();
       const isRawFile = RENDERABLE_EXTS.includes(ext);
       item.className = "tree-item" + (node.path === currentFile || node.path === previewRawFile ? " active" : "") + (node.ignored ? " ignored" : "");
+      item.tabIndex = 0;
+      item.dataset.path = node.path;
+      item.dataset.type = "file";
       item.innerHTML = `<span class="icon">📄</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}</span>`;
       if (isRawFile) {
         item.addEventListener("click", () => selectPreviewRawFile(node.path));
@@ -2816,19 +2824,40 @@ window.restartTerminal = async () => {
 // ── Keybindings ─────────────────────────────────────────────────────────────
 
 document.addEventListener("keydown", (e) => {
-  if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
+  if (!e.ctrlKey || e.altKey || e.metaKey) return;
   const inEditor = cmView && cmView.dom.contains(document.activeElement);
   let action = null;
-  switch (e.key) {
-    case ",": action = () => switchPanel("settings"); break;
-    case ">": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
-    case "'": action = () => switchPanel("preview"); break;
-    // Ctrl+. focuses the editor; no-op if already there.
-    case ".": if (!inEditor) action = () => cmView?.focus(); break;
-    case "[": action = () => { switchPanel("terminal"); initTerminal(); }; break;
-    case "]": action = () => switchPanel("logs"); break;
+  if (e.shiftKey) {
+    switch (e.key) {
+      case "H": action = () => toggleRightPanel(); break;
+      case ".": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
+      case ">": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
+    }
+  } else {
+    switch (e.key) {
+      case ",": action = () => switchPanel("settings"); break;
+      case "'": action = () => switchPanel("preview"); break;
+      // Ctrl+. focuses the editor; no-op if already there.
+      case ".": if (!inEditor) action = () => cmView?.focus(); break;
+      case "[": action = () => { switchPanel("terminal"); initTerminal(); }; break;
+      case "]": action = () => switchPanel("logs"); break;
+      case "h": action = () => toggleSidebar(); break;
+      case "l": action = () => {
+        if (document.getElementById("sidebar").classList.contains("collapsed")) toggleSidebar();
+        (document.querySelector(".tree-item.active") || document.querySelector(".tree-item"))?.focus();
+      }; break;
+    }
   }
   if (action) { e.preventDefault(); e.stopPropagation(); action(); }
+}, true);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Delete") return;
+  const el = document.activeElement;
+  if (!el?.classList.contains("tree-item") || !el.dataset.path) return;
+  e.preventDefault();
+  _contextTarget = { path: el.dataset.path, type: el.dataset.type };
+  deleteContextTarget();
 }, true);
 </script>
 {% endraw %}
