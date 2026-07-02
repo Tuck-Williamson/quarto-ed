@@ -18,7 +18,7 @@ RUN wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUART
 # R (needed for Quarto knitr engine)
 # r-base-dev: C/C++ toolchain for source compilation fallbacks.
 # libuv1-dev: required by the 'fs' R package (rmarkdown dep chain).
-RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev libuv1-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends r-base r-base-dev libuv1-dev default-jre \
     && rm -rf /var/lib/apt/lists/*
 
 # R packages for knitr/rmarkdown code-chunk execution.
@@ -28,8 +28,14 @@ RUN Rscript -e "install.packages(c('knitr', 'rmarkdown'), \
       repos='https://packagemanager.posit.co/cran/__linux__/bookworm/latest')" \
     && Rscript -e "stopifnot(all(c('knitr','rmarkdown') %in% installed.packages()[,'Package']))"
 
+# Addint Quarto tools (installs to /root/.local/share/quarto/...)
+RUN /opt/quarto/bin/quarto install verapdf --no-prompt 
+RUN /opt/quarto/bin/quarto install chrome-headless-shell --no-prompt 
+
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
-RUN /opt/quarto/bin/quarto install tinytex --no-prompt
+RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
+    && /root/.TinyTeX/bin/x86_64-linux/tlmgr update --self \
+    && /root/.TinyTeX/bin/x86_64-linux/tlmgr install tagpdf luamml
 
 # Python dependencies
 COPY requirements.txt /tmp/requirements.txt
@@ -47,7 +53,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3-pip git openssh-client ca-certificates \
-        supervisor r-base libgnutls30 \
+        supervisor r-base libgnutls30 default-jre \
     && rm -rf /var/lib/apt/lists/*
 
 # Artifacts from builder
@@ -57,6 +63,8 @@ COPY --from=builder /usr/local/lib/python3.11/dist-packages \
                     /usr/local/lib/python3.11/dist-packages
 COPY --from=builder /usr/lib/R/library /usr/lib/R/library
 COPY --from=builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
+
+COPY --from=builder /root/.local/share/ /root/.local/share/
 
 COPY app /app/app
 COPY docker /app/docker
@@ -85,6 +93,7 @@ RUN chmod o+x /root \
     && chmod -R o+rX /root/.TinyTeX /opt/quarto \
         /usr/local/lib/python3.11/dist-packages \
         /usr/lib/R/library /usr/local/lib/R/site-library \
+	/root/.local/share/\
     && chmod -R o-rwx /app
 
 WORKDIR /app
