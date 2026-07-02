@@ -2821,8 +2821,7 @@ document.addEventListener("keydown", (e) => {
   let action = null;
   switch (e.key) {
     case ",": action = () => switchPanel("settings"); break;
-    // Ctrl+/ doubles as toggle-comment inside the editor — only intercept outside it.
-    case "/": if (!inEditor) action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
+    case ">": action = () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }; break;
     case "'": action = () => switchPanel("preview"); break;
     // Ctrl+. focuses the editor; no-op if already there.
     case ".": if (!inEditor) action = () => cmView?.focus(); break;
