@@ -164,6 +164,22 @@ async def _pipe_reader(user_id: int, stream: asyncio.StreamReader, prefix: str =
         pass
 
 
+_TIOCSCTTY = getattr(termios, "TIOCSCTTY", 0x540E)  # 0x540E = Linux x86/x86_64
+
+
+def _setup_terminal_child() -> None:
+    """preexec_fn: new session + acquire slave pty as controlling terminal.
+
+    Without setsid() the child inherits the parent's session (uvicorn's),
+    which has no controlling terminal. The terminal driver can only deliver
+    SIGINT/SIGTSTP to the foreground process group of the session whose
+    controlling terminal the pty is — so without this setup, Ctrl-C and
+    Ctrl-Z never reach the running process.
+    """
+    os.setsid()
+    fcntl.ioctl(0, _TIOCSCTTY, 0)  # fd 0 = stdin = slave pty after Popen dup2s
+
+
 def _set_winsize(fd: int, cols: int, rows: int) -> None:
     """Set PTY window size (cols × rows)."""
     size = struct.pack("HHHH", rows, cols, 0, 0)
@@ -210,6 +226,7 @@ def _spawn_terminal(user_id: int, workspace_path: str, cols: int = 80, rows: int
             cwd=workspace_path,
             env=env,
             close_fds=True,
+            preexec_fn=_setup_terminal_child,
         )
     except Exception:
         os.close(master_fd)
