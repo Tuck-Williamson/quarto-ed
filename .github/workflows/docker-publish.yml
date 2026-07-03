@@ -102,8 +102,31 @@ jobs:
       - name: Build Test Image
         run: docker build -f Dockerfile.test --build-arg BASE_IMAGE=app:ci -t app:test .
 
+      # Fast suite always (default CMD; pass-2 non-root is skipped under CI).
+      # On main-branch / PR-merge builds, additionally run the slow PDF suite in
+      # a second container concurrently. Both must pass before the Trivy scan and
+      # push/deploy steps below. PDF renders are excluded from PR builds for fast
+      # feedback (pytest.ini's `-m "not pdf"`).
       - name: Run tests
-        run: docker run --rm -e CI app:test
+        run: |
+          docker run --rm -e CI app:test > fast.log 2>&1 &
+          FAST_PID=$!
+          PDF_PID=""
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "main build → running PDF suite in parallel"
+            docker run --rm -e RUN_PDF_TESTS=1 app:test \
+              python3.11 -m pytest tests/ -m pdf --no-cov --tb=short -q > pdf.log 2>&1 &
+            PDF_PID=$!
+          fi
+          wait "$FAST_PID"; RC_FAST=$?
+          RC_PDF=0
+          if [ -n "$PDF_PID" ]; then wait "$PDF_PID"; RC_PDF=$?; fi
+          echo "::group::Fast suite output"; cat fast.log; echo "::endgroup::"
+          if [ -f pdf.log ]; then echo "::group::PDF suite output"; cat pdf.log; echo "::endgroup::"; fi
+          if [ "$RC_FAST" -ne 0 ] || [ "$RC_PDF" -ne 0 ]; then
+            echo "Tests failed (fast=$RC_FAST pdf=$RC_PDF)"
+            exit 1
+          fi
 
       - name: Cache Trivy Vulnerability DB
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

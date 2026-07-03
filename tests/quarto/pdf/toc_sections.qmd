@@ -1,0 +1,29 @@
+---
+title: "TOC and Numbered Sections"
+author: "Test Suite"
+date: today
+format:
+  pdf:
+    toc: true
+    number-sections: true
+---
+
+# First Section
+
+Content for the first numbered section.
+
+## Subsection A
+
+Nested content that should appear in the table of contents.
+
+## Subsection B
+
+More nested content.
+
+# Second Section
+
+A second top-level section to give the TOC multiple entries.
+
+## Subsection C
+
+Final subsection.

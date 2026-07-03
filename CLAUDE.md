@@ -20,7 +20,22 @@ python3 -c "import secrets; print(secrets.token_hex(32))"                       
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # TOKEN_ENCRYPTION_KEY
 ```
 
-There is no test suite. Manual verification: OAuth login → load repo → edit → sync flow.
+### Tests
+
+The suite lives in `tests/` (pytest + pytest-asyncio, in-memory SQLite). Run it
+against the built image with `scripts/run-tests.sh` (builds `app:ci` → `app:test`,
+then runs the passes in parallel and combines coverage). The passes:
+
+- **Pass 1 (root):** full fast suite; `requires_root` sandbox tests run.
+- **Pass 2 (non-root):** `test_security.py` under an unprivileged user so
+  `requires_non_root` tests run. Skipped in GitHub Actions (`CI` set) because
+  `su` to another user isn't available there.
+- **PDF suite (`-m pdf`):** slow TinyTeX PDF renders. Runs locally always, and in
+  CI only on `main` (i.e. PR-merge builds); excluded from normal PR runs via
+  `-m "not pdf"`. Enable elsewhere with `RUN_PDF_TESTS=1`.
+
+Beyond automated tests, manually verify the OAuth login → load repo → edit →
+sync flow for changes touching that path.
 
 ## Deployment
 
@@ -69,9 +84,21 @@ Owns all quarto preview lifecycle:
 - Settings API: reads/writes `settings.json` + `snippets.json` in a per-user GitHub repo (`{username}-quarto-ed-settings`), auto-cloned on access, pushed on every save.
 - AI chat: streams Anthropic API via `httpx.AsyncClient.stream()` → `StreamingResponse(text/event-stream)`.
 
+### Frontend styling (Tailwind)
+
+Styling is Tailwind CSS compiled by a real build step — no runtime CDN. Source is
+`app/static/src/input.css` (theme in `tailwind.config.js`); reused components are
+authored utility-first with `@apply`, and the palette lives in CSS custom
+properties so the light/dark toggle keeps working. The `cssbuilder` stage in the
+`Dockerfile` runs `tailwindcss --minify` → `app/static/app.css`, served at
+`/static/app.css` (FastAPI `StaticFiles`, mounted in `app/main.py`). The compiled
+CSS is a build artifact (git-ignored); regenerate locally with `npm run build:css`
+(or `npm run watch:css`). Because CSS is precompiled, the CSP drops
+`cdn.tailwindcss.com` and `'unsafe-eval'`.
+
 ### Editor SPA (`app/templates/editor.html`)
 
-Three-pane layout (no build pipeline — CodeMirror 6 loaded via `esm.sh` CDN ESM):
+Three-pane layout (CodeMirror 6 loaded via `esm.sh` CDN ESM; CSS via the Tailwind build above):
 - **Left**: collapsible file browser (tree), "+ New file" button
 - **Center**: CodeMirror 6 editor with tabs, dirty indicator, CTRL+S to save
 - **Right**: switchable Preview (iframe → `/api/preview/`) / AI Chat (SSE) / Settings

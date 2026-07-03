@@ -1,0 +1,29 @@
+---
+title: "Tables in PDF"
+author: "Test Suite"
+date: today
+format: pdf
+---
+
+# Pipe Table
+
+| Name  | Role      | Score |
+|-------|-----------|------:|
+| Alice | Author    |    92 |
+| Bob   | Reviewer  |    88 |
+| Carol | Editor    |    95 |
+
+: A simple pipe table {#tbl-simple}
+
+See @tbl-simple for the scores.
+
+# Grid Table
+
++---------------+---------------+
+| Feature       | Supported     |
++===============+===============+
+| Long cells    | Yes, with     |
+|               | wrapping text |
++---------------+---------------+
+| Block content | Also yes      |
++---------------+---------------+

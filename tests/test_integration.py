@@ -121,12 +121,12 @@ async def test_settings_defaults_then_save_then_read(auth_client, monkeypatch, t
     settings_dir.mkdir(parents=True)
     (settings_dir / ".git").mkdir()
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     async def _noop_push(_path, _msg=""):
         pass
 
-    monkeypatch.setattr(proxy, "_push_settings", _noop_push)
+    monkeypatch.setattr(proxy._core, "_push_settings", _noop_push)
 
     # Read — should return defaults merged with empty file
     resp = await auth_client.get("/api/settings")

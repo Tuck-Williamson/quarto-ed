@@ -33,13 +33,31 @@ RUN /opt/quarto/bin/quarto install verapdf --no-prompt
 RUN /opt/quarto/bin/quarto install chrome-headless-shell --no-prompt 
 
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
+# Beyond tagpdf/luamml, pre-install the LaTeX packages Quarto needs to render
+# callout blocks to PDF (tcolorbox + its deps, fontawesome5 icons, luatexbase).
+# Without these, `quarto render --to pdf` on a callout doc triggers an on-demand
+# tlmgr install that fails in an offline container.
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && /root/.TinyTeX/bin/x86_64-linux/tlmgr update --self \
-    && /root/.TinyTeX/bin/x86_64-linux/tlmgr install tagpdf luamml
+    && /root/.TinyTeX/bin/x86_64-linux/tlmgr install \
+        tagpdf luamml \
+        tcolorbox pgf environ trimspaces fontawesome5 luatexbase etoolbox
 
 # Python dependencies
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+
+# ── Stage: Tailwind CSS build ─────────────────────────────────────────────────
+# Compiles app/static/src/input.css → app/static/app.css (minified), purged
+# against the templates. Replaces the runtime cdn.tailwindcss.com Play CDN.
+FROM node:20-slim AS cssbuilder
+WORKDIR /build
+COPY package.json ./
+RUN npm install --no-audit --no-fund
+COPY tailwind.config.js ./
+COPY app/static/src ./app/static/src
+COPY app/templates ./app/templates
+RUN npx tailwindcss -i app/static/src/input.css -o app/static/app.css --minify
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -68,6 +86,9 @@ COPY --from=builder /root/.local/share/ /root/.local/share/
 
 COPY app /app/app
 COPY docker /app/docker
+
+# Compiled Tailwind CSS from the cssbuilder stage (served at /static/app.css).
+COPY --from=cssbuilder /build/app/static/app.css /app/app/static/app.css
 
 RUN mkdir -p /workspace /var/log/supervisor \
     && chmod +x /app/docker/entrypoint.sh

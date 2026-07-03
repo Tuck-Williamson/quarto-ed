@@ -9,3 +9,9 @@ build/
 .venv/
 venv/
 scripts/test-results/
+
+# Node / Tailwind build
+node_modules/
+package-lock.json
+# Compiled CSS is a build artifact (produced by the cssbuilder Docker stage)
+app/static/app.css

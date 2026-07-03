@@ -57,9 +57,18 @@ if $RUN; then
   mkdir -p "$RESULTS_DIR"
   chmod 777 "$RESULTS_DIR"   # allow non-root testrunner to write in pass 2
 
-  # Pass 1 (root): full suite.  requires_root sandbox tests run; requires_non_root skip.
-  # Coverage data written to .coverage.1 so pass-2 data can be combined separately.
-  echo "=== Running tests (pass 1 of 2: root) ==="
+  # ── Passes 1–3 run concurrently (separate containers, shared results vol) ────
+  # Each container writes its own coverage data file and JUnit XML, and its
+  # console output to a per-pass log so the parallel streams stay readable.
+  # Stage-three analysis (coverage combine + summary) runs only after all
+  # complete.
+  #
+  #   Pass 1 (root):      full fast suite; requires_root run, requires_non_root skip.
+  #   Pass 2 (non-root):  test_security.py as testrunner; requires_non_root run.
+  #   Pass 3 (PDF, root): slow `-m pdf` TinyTeX renders (RUN_PDF_TESTS=1). Runs
+  #                       with --no-cov (it shells out to quarto, no app code).
+  echo "=== Running tests (passes 1–3 in parallel) ==="
+
   docker run --rm \
     -e COVERAGE_FILE=/test-results/.coverage.1 \
     -v "$RESULTS_DIR:/test-results" \
@@ -67,12 +76,10 @@ if $RUN; then
     python3.11 -m pytest tests/ \
       --junit-xml=/test-results/pass1.xml \
       --cov=app --cov-report= \
-      --tb=short -q
-  echo ""
+      --tb=short -q \
+    > "$RESULTS_DIR/pass1.log" 2>&1 &
+  PID1=$!
 
-  # Pass 2 (non-root): security module only.  requires_non_root tests now run.
-  # Run the full module without a name filter so all requires_non_root tests fire.
-  echo "=== Running tests (pass 2 of 2: non-root sandbox tests) ==="
   docker run --rm --user testrunner \
     -e COVERAGE_FILE=/test-results/.coverage.2 \
     -v "$RESULTS_DIR:/test-results" \
@@ -80,11 +87,32 @@ if $RUN; then
     python3.11 -m pytest /app/tests/test_security.py \
       --junit-xml=/test-results/pass2.xml \
       --cov=app --cov-report= \
-      -p no:cacheprovider --tb=short -q --rootdir=/app
-  echo ""
+      -p no:cacheprovider --tb=short -q --rootdir=/app \
+    > "$RESULTS_DIR/pass2.log" 2>&1 &
+  PID2=$!
 
-  # ── Combined coverage ──────────────────────────────────────────────────────
-  # Merge the two coverage data files and emit a single combined report.
+  docker run --rm \
+    -e RUN_PDF_TESTS=1 \
+    -v "$RESULTS_DIR:/test-results" \
+    app:test \
+    python3.11 -m pytest tests/ -m pdf \
+      --junit-xml=/test-results/pass3.xml \
+      --no-cov \
+      --tb=short -q \
+    > "$RESULTS_DIR/pass3.log" 2>&1 &
+  PID3=$!
+
+  wait "$PID1"; RC1=$?
+  wait "$PID2"; RC2=$?
+  wait "$PID3"; RC3=$?
+
+  for n in 1 2 3; do
+    echo "----- pass $n output -----"
+    cat "$RESULTS_DIR/pass${n}.log"
+    echo ""
+  done
+
+  # ── Stage 3: combined coverage (passes 1 & 2; pass 3 has --no-cov) ───────────
   # The source files live at /app inside the image, so we run from there.
   echo "=== Combined coverage ==="
   docker run --rm \
@@ -111,6 +139,14 @@ if $RUN; then
   # ── Per-test summary table ─────────────────────────────────────────────────
   python3 "$SCRIPT_DIR/summarize_test_results.py" \
     "$RESULTS_DIR/pass1.xml" \
-    "$RESULTS_DIR/pass2.xml"
+    "$RESULTS_DIR/pass2.xml" \
+    "$RESULTS_DIR/pass3.xml"
+
+  if [ "$RC1" -ne 0 ] || [ "$RC2" -ne 0 ] || [ "$RC3" -ne 0 ]; then
+    echo ""
+    echo "=== TESTS FAILED (pass1=$RC1 pass2=$RC2 pass3=$RC3) ==="
+    exit 1
+  fi
+  echo "=== All passes green ==="
 
 fi

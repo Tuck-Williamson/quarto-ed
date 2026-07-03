@@ -1,0 +1,31 @@
+---
+title: "Code Listings in PDF"
+author: "Test Suite"
+date: today
+format:
+  pdf:
+    highlight-style: github
+---
+
+# Syntax Highlighting
+
+Non-executed fenced code should be typeset with syntax highlighting. No engine
+is required because these chunks are not evaluated.
+
+```python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+print(greet("world"))
+```
+
+```r
+square <- function(x) x * x
+sapply(1:5, square)
+```
+
+Inline code like `git rebase --onto` should also render.
+
+# Blockquote
+
+> A blockquote to exercise another block-level element in the PDF template.

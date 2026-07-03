@@ -33,7 +33,7 @@ async def test_get_settings_returns_defaults_when_no_repo(auth_client, monkeypat
     async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
-    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+    monkeypatch.setattr(proxy._core, "_ensure_settings_cloned", _mock_ensure_cloned)
 
     resp = await auth_client.get("/api/settings")
     assert resp.status_code == 200
@@ -53,7 +53,7 @@ async def test_save_settings_returns_no_repo_when_not_cloned(auth_client, monkey
     async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
-    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+    monkeypatch.setattr(proxy._core, "_ensure_settings_cloned", _mock_ensure_cloned)
 
     resp = await auth_client.post(
         "/api/settings",
@@ -80,7 +80,7 @@ async def test_get_settings_reads_from_local_repo(auth_client, test_user, monkey
     )
     (settings_dir / "snippets.json").write_text(json.dumps([{"label": "custom"}]))
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     resp = await auth_client.get("/api/settings")
     assert resp.status_code == 200
@@ -101,13 +101,13 @@ async def test_save_settings_writes_to_local_repo(auth_client, monkeypatch, tmp_
     settings_dir.mkdir(parents=True)
     (settings_dir / ".git").mkdir()
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     # Stub out the git push so we don't need a real remote
     async def _noop_push(_path, _msg=""):
         pass
 
-    monkeypatch.setattr(proxy, "_push_settings", _noop_push)
+    monkeypatch.setattr(proxy._core, "_push_settings", _noop_push)
 
     resp = await auth_client.post(
         "/api/settings",
@@ -126,10 +126,11 @@ async def test_save_settings_writes_to_local_repo(auth_client, monkeypatch, tmp_
 # Repo-level settings (POST /api/settings/repo, GET /api/settings)
 # ---------------------------------------------------------------------------
 
-async def test_save_repo_settings_no_workspace(auth_client, db_session, test_user, monkeypatch):
+async def test_save_repo_settings_no_workspace(auth_client, db_session, test_user):
     """POST /api/settings/repo returns 400 when no workspace is loaded."""
-    from app import auth, proxy
     from app.models import Session as AppSession
+    from app.main import app
+    from app.proxy import require_session
     import secrets
 
     # Create a session with no workspace_path
@@ -143,11 +144,10 @@ async def test_save_repo_settings_no_workspace(auth_client, db_session, test_use
     await db_session.commit()
     await db_session.refresh(sess_no_ws)
 
-    async def _mock_get_session(_request):
-        return sess_no_ws
-
-    monkeypatch.setattr(auth, "get_current_session", _mock_get_session)
-    monkeypatch.setattr(proxy, "get_current_session", _mock_get_session)
+    # save_repo_settings depends on require_workspace, which derives from
+    # require_session; overriding the latter with a workspace-less session makes
+    # the workspace check fire.
+    app.dependency_overrides[require_session] = lambda: sess_no_ws
 
     resp = await auth_client.post("/api/settings/repo", json={"settings": {"theme": "light"}})
     assert resp.status_code == 400
@@ -177,7 +177,7 @@ async def test_save_repo_settings_writes_and_get_reads(git_auth_client, monkeypa
     async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
-    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+    monkeypatch.setattr(proxy._core, "_ensure_settings_cloned", _mock_ensure_cloned)
 
     resp2 = await client.get("/api/settings")
     assert resp2.status_code == 200
@@ -213,7 +213,7 @@ async def test_load_repo_settings_ignores_non_dict_json(git_auth_client, monkeyp
     async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
-    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+    monkeypatch.setattr(proxy._core, "_ensure_settings_cloned", _mock_ensure_cloned)
 
     resp = await client.get("/api/settings")
     assert resp.status_code == 200
@@ -229,7 +229,7 @@ async def test_get_settings_includes_new_fields(auth_client, test_user, monkeypa
     (settings_dir / ".git").mkdir()
     (settings_dir / "settings.json").write_text(json.dumps({"theme": "light"}))
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     resp = await auth_client.get("/api/settings")
     assert resp.status_code == 200

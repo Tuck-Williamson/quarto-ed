@@ -1,0 +1,13 @@
+{
+  "name": "quarto-ed-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tailwind CSS build for the quarto-ed editor UI.",
+  "scripts": {
+    "build:css": "tailwindcss -i app/static/src/input.css -o app/static/app.css --minify",
+    "watch:css": "tailwindcss -i app/static/src/input.css -o app/static/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

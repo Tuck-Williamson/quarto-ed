@@ -120,8 +120,16 @@ async def anon_client():
 
 @pytest_asyncio.fixture
 async def auth_client(test_session, monkeypatch):
-    """Client whose every request is authenticated as test_session."""
-    from app import auth, proxy
+    """Client whose every request is authenticated as test_session.
+
+    auth.py routes still call get_current_session directly (monkeypatched);
+    proxy routes resolve the session through FastAPI dependencies, overridden
+    here via app.dependency_overrides. require_workspace is left un-overridden
+    so it derives from the overridden require_session and still enforces its
+    own workspace check.
+    """
+    from app import auth
+    from app.proxy import current_session, require_session
 
     sess = test_session
 
@@ -129,13 +137,18 @@ async def auth_client(test_session, monkeypatch):
         return sess
 
     monkeypatch.setattr(auth, "get_current_session", _mock_get_current_session)
-    monkeypatch.setattr(proxy, "get_current_session", _mock_get_current_session)
 
     from app.main import app
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        yield client
+    app.dependency_overrides[current_session] = lambda: sess
+    app.dependency_overrides[require_session] = lambda: sess
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(current_session, None)
+        app.dependency_overrides.pop(require_session, None)
 
 
 # ---------------------------------------------------------------------------
@@ -195,16 +208,22 @@ async def git_auth_client(db_session, test_user, git_workspace, monkeypatch):
     await db_session.commit()
     await db_session.refresh(sess)
 
-    from app import auth, proxy
+    from app import auth
+    from app.proxy import current_session, require_session
 
     async def _mock_get_current_session(_request):
         return sess
 
     monkeypatch.setattr(auth, "get_current_session", _mock_get_current_session)
-    monkeypatch.setattr(proxy, "get_current_session", _mock_get_current_session)
 
     from app.main import app
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        yield client, sess
+    app.dependency_overrides[current_session] = lambda: sess
+    app.dependency_overrides[require_session] = lambda: sess
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            yield client, sess
+    finally:
+        app.dependency_overrides.pop(current_session, None)
+        app.dependency_overrides.pop(require_session, None)

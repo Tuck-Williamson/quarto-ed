@@ -28,6 +28,25 @@ shared, unsandboxed environment.
 privileged/root container), the per-user sandbox in `app/sandbox.py` applies
 automatically and `ALLOWED_GITHUB_USERS` is optional.
 
+## OAuth scope
+
+Login requests the GitHub `repo` scope, which grants read/write access to
+**all** of the user's repositories (public and private), not just the one being
+edited. This is required to clone/pull/push arbitrary repos the user selects and
+to create the per-user settings repo. The encrypted access token therefore has a
+broad blast radius: keep `TOKEN_ENCRYPTION_KEY` secret, and prefer running the
+app only for trusted users (`ALLOWED_GITHUB_USERS`).
+
+## Browser hardening
+
+App pages are served with a `Content-Security-Policy` plus `X-Frame-Options`,
+`X-Content-Type-Options`, and `Referrer-Policy` headers (see `app/main.py`). The
+CSP restricts script/style/connect origins to the CDNs the editor actually uses
+and blocks exfiltration to arbitrary hosts. It is intentionally *not* applied to
+the quarto preview proxy (`/api/preview/*`), whose rendered output ships its own
+CDN assets. A browser-direct Ollama endpoint other than `localhost:11434`
+requires adding its origin via the `CSP_CONNECT_SRC_EXTRA` env var.
+
 ## Supported Versions
 
 quarto-ed is pre-1.0 and under active development. Only the latest released
