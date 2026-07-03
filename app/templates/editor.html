@@ -611,7 +611,7 @@
 
     /* ── Sandbox warning chip ── */
     .sb-sandbox-warn {
-      color: var(--yellow); font-size: 0.67rem; white-space: nowrap;
+      color: darkred; font-size: 0.67rem; white-space: nowrap;
       border: 1px solid rgba(251,191,36,0.35); border-radius: 3px;
       padding: 0.05rem 0.4rem; cursor: default;
     }
@@ -1087,7 +1087,7 @@
   <span class="sb-versions">quarto-ed {{ app_version }} ({{ git_sha }}) · Quarto {{ quarto_version }}</span>
   <span style="flex:1"></span>
   {% if terminal_sandbox_warning %}
-  <span class="sb-sandbox-warn" title="Terminal runs without per-user isolation. Multiple users may read each other&#x27;s workspace files.">⚠ shared terminal</span>
+  <span class="sb-sandbox-warn animate-bounce" title="Terminal runs without per-user isolation. Multiple users may read each other&#x27;s workspace files.">⚠ shared terminal</span>
   <span class="sb-sep"></span>
   {% endif %}
   <button id="sb-issues-btn" class="sb-issues-btn" style="display:none" onclick="showIssuesDialog()">⚠ <span id="sb-issues-count">0</span> issues</button>
@@ -1113,7 +1113,7 @@
 </dialog>
 
 <!-- Sync dialog -->
-<dialog id="syncDialog">
+<dialog id="syncDialog" class="m-auto p-4">
   <h3>Sync to GitHub</h3>
   <div class="field">
     <label>Commit message</label>
@@ -1126,7 +1126,7 @@
 </dialog>
 
 <!-- Settings repo first-time dialog -->
-<dialog id="settingsRepoDialog">
+<dialog id="settingsRepoDialog" class="m-auto p-4">
   <h3>Save your settings</h3>
   <p>Create a private GitHub repo <strong id="settings-repo-name"></strong> to persist your editor preferences and custom snippets across sessions.</p>
   <div class="actions">
@@ -1136,7 +1136,7 @@
 </dialog>
 
 <!-- Inline AI prompt dialog -->
-<dialog id="inlineAIDialog" style="width:min(680px,90vw);border-radius:8px;padding:1.2rem;background:var(--bg2);border:1px solid var(--border);color:var(--text)">
+<dialog id="inlineAIDialog" class="m-auto p-4" style="width:min(680px,90vw);border-radius:8px;padding:1.2rem;background:var(--bg2);border:1px solid var(--border);color:var(--text)">
   <h3 style="margin:0 0 0.6rem;font-size:0.9rem">Inline AI Prompt <span style="font-weight:400;color:var(--text2);font-size:0.78rem">(Ctrl+Shift+I)</span></h3>
   <div id="inline-ollama-repo-warning" class="ollama-repo-warning" style="display:none">
     ⚠ Ollama endpoint set by this repo: <code id="inline-ollama-repo-endpoint-url"></code>
@@ -1181,7 +1181,7 @@
 </dialog>
 
 <!-- Quickhelp dialog -->
-<dialog id="quickHelpDialog">
+<dialog id="quickHelpDialog" class="m-auto p-4">
   <h3>Editor keybindings</h3>
   <div id="quickHelpContent"></div>
   <div class="actions">
@@ -1190,7 +1190,7 @@
 </dialog>
 
 <!-- Issues dialog -->
-<dialog id="issuesDialog" style="min-width:580px;max-width:90vw">
+<dialog id="issuesDialog" style="min-width:580px;max-width:90vw p-4">
   <h3>Issues</h3>
   <div id="issues-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:0.5rem;margin:0.75rem 0"></div>
   <div class="actions">
