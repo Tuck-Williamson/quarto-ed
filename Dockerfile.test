@@ -19,7 +19,15 @@ WORKDIR /app
 
 # Two-pass test run:
 #   Pass 1 (root):     full suite — requires_root sandbox tests run, requires_non_root skip
-#   Pass 2 (non-root): security module only — requires_non_root tests now run
+#   Pass 2 (non-root): security module only — requires_non_root tests now run, requires_root skip
+#   CI=true skips pass 2 (su testrunner is unavailable in GitHub Actions runners).
+#   scripts/run-tests.sh runs pass 2 via a separate `docker run --user testrunner` call
+#   and is unaffected by this guard.
 CMD ["bash", "-c", \
   "python3.11 -m pytest tests/ --tb=short -q && \
-   su testrunner -s /bin/bash -c 'python3.11 -m pytest /app/tests/test_security.py -k not_root --tb=short -q --no-cov --rootdir=/app'"]
+   if [ -n \"${CI:-}\" ]; then \
+     echo '=== Pass 2: skipped (CI environment detected — run scripts/run-tests.sh locally for full coverage) ==='; \
+   else \
+     echo '=== Pass 2: non-root sandbox tests ===' && \
+     su testrunner -s /bin/bash -c 'python3.11 -m pytest /app/tests/test_security.py -p no:cacheprovider --tb=short -q --no-cov --rootdir=/app'; \
+   fi"]

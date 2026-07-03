@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -202,6 +203,7 @@
       transition: background 0.08s;
     }
     .tree-item:hover { background: var(--bg3); }
+    .tree-item:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
     .tree-item.active { background: rgba(232,151,74,0.1); color: var(--accent); }
     .tree-item .icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.68rem; }
     .tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -593,7 +595,25 @@
     .issue-msg {
       padding: 0.4rem 0.6rem; font-family: "JetBrains Mono", monospace;
       font-size: 0.72rem; line-height: 1.6; color: var(--text);
-      white-space: pre-wrap; word-break: break-all; overflow-x: auto;
+      white-space: pre-wrap; word-break: break-all;
+      max-height: 12rem; overflow-y: auto; overflow-x: auto;
+    }
+
+    /* ── Terminal panel ── */
+    .term-toolbar {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .term-toolbar .btn { color: #ede8e2; }
+    #terminal-container { flex: 1; overflow: hidden; background: #1a1a1a; padding: 4px; }
+    #panel-terminal { background: #1a1a1a; }
+
+    /* ── Sandbox warning chip ── */
+    .sb-sandbox-warn {
+      color: darkred; font-size: 0.67rem; white-space: nowrap;
+      border: 1px solid rgba(251,191,36,0.35); border-radius: 3px;
+      padding: 0.05rem 0.4rem; cursor: default;
     }
   </style>
 </head>
@@ -804,6 +824,7 @@
     <div class="panel-tabs">
       <button class="panel-tab active" onclick="switchPanel('preview')">Preview</button>
       <button class="panel-tab" onclick="switchPanel('ai')">AI</button>
+      <button class="panel-tab" onclick="switchPanel('terminal')">Terminal</button>
       <button class="panel-tab" onclick="switchPanel('logs')">Logs</button>
       <button class="panel-tab" onclick="switchPanel('settings')">Settings</button>
     </div>
@@ -856,6 +877,16 @@
           <button class="btn btn-ghost" onclick="clearLogs()" style="font-size:0.7rem">Clear</button>
         </div>
         <div id="logs-output"></div>
+      </div>
+
+      <!-- Terminal -->
+      <div class="panel-pane" id="panel-terminal">
+        <div class="term-toolbar">
+          <span style="font-size:0.67rem;color:var(--text2);font-family:'JetBrains Mono',monospace">Shell · workspace directory</span>
+          <div style="flex:1"></div>
+          <button class="btn btn-ghost" onclick="restartTerminal()" style="font-size:0.7rem" title="Restart shell">↺</button>
+        </div>
+        <div id="terminal-container"></div>
       </div>
 
       <!-- Settings -->
@@ -1055,6 +1086,10 @@
   <span class="sb-sep"></span>
   <span class="sb-versions">quarto-ed {{ app_version }} ({{ git_sha }}) · Quarto {{ quarto_version }}</span>
   <span style="flex:1"></span>
+  {% if terminal_sandbox_warning %}
+  <span class="sb-sandbox-warn animate-bounce" title="Terminal runs without per-user isolation. Multiple users may read each other&#x27;s workspace files.">⚠ shared terminal</span>
+  <span class="sb-sep"></span>
+  {% endif %}
   <button id="sb-issues-btn" class="sb-issues-btn" style="display:none" onclick="showIssuesDialog()">⚠ <span id="sb-issues-count">0</span> issues</button>
 </div>
 
@@ -1078,7 +1113,7 @@
 </dialog>
 
 <!-- Sync dialog -->
-<dialog id="syncDialog">
+<dialog id="syncDialog" class="m-auto p-4">
   <h3>Sync to GitHub</h3>
   <div class="field">
     <label>Commit message</label>
@@ -1091,7 +1126,7 @@
 </dialog>
 
 <!-- Settings repo first-time dialog -->
-<dialog id="settingsRepoDialog">
+<dialog id="settingsRepoDialog" class="m-auto p-4">
   <h3>Save your settings</h3>
   <p>Create a private GitHub repo <strong id="settings-repo-name"></strong> to persist your editor preferences and custom snippets across sessions.</p>
   <div class="actions">
@@ -1101,7 +1136,7 @@
 </dialog>
 
 <!-- Inline AI prompt dialog -->
-<dialog id="inlineAIDialog" style="width:min(680px,90vw);border-radius:8px;padding:1.2rem;background:var(--bg2);border:1px solid var(--border);color:var(--text)">
+<dialog id="inlineAIDialog" class="m-auto p-4" style="width:min(680px,90vw);border-radius:8px;padding:1.2rem;background:var(--bg2);border:1px solid var(--border);color:var(--text)">
   <h3 style="margin:0 0 0.6rem;font-size:0.9rem">Inline AI Prompt <span style="font-weight:400;color:var(--text2);font-size:0.78rem">(Ctrl+Shift+I)</span></h3>
   <div id="inline-ollama-repo-warning" class="ollama-repo-warning" style="display:none">
     ⚠ Ollama endpoint set by this repo: <code id="inline-ollama-repo-endpoint-url"></code>
@@ -1146,7 +1181,7 @@
 </dialog>
 
 <!-- Quickhelp dialog -->
-<dialog id="quickHelpDialog">
+<dialog id="quickHelpDialog" class="m-auto p-4">
   <h3>Editor keybindings</h3>
   <div id="quickHelpContent"></div>
   <div class="actions">
@@ -1155,7 +1190,7 @@
 </dialog>
 
 <!-- Issues dialog -->
-<dialog id="issuesDialog" style="min-width:580px;max-width:90vw">
+<dialog id="issuesDialog" style="min-width:580px;max-width:90vw p-4">
   <h3>Issues</h3>
   <div id="issues-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:0.5rem;margin:0.75rem 0"></div>
   <div class="actions">
@@ -1224,6 +1259,14 @@ let settingsSaveTimer = null;
 let autoSaveTimer = null;
 let _previewStarting = false;
 const _issues = [];
+
+// ── Terminal state ─────────────────────────────────────────────────────────
+let _term = null;
+let _termFit = null;
+let _termWs = null;
+let _termConnected = false;
+let _Terminal = null;
+let _FitAddon = null;
 
 // ── Built-in snippets ──────────────────────────────────────────────────────
 const BUILTIN_SNIPPETS = [
@@ -1439,6 +1482,9 @@ function renderTree(nodes, container) {
       wrapper.className = "tree-dir";
       const header = document.createElement("div");
       header.className = "tree-item" + (node.ignored ? " ignored" : "");
+      header.tabIndex = 0;
+      header.dataset.path = node.path;
+      header.dataset.type = "dir";
       header.innerHTML = `<span class="icon">▸</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}/</span>`;
       const children = document.createElement("div");
       children.className = "tree-children hidden";
@@ -1456,6 +1502,9 @@ function renderTree(nodes, container) {
       const ext = node.name.slice(node.name.lastIndexOf(".")).toLowerCase();
       const isRawFile = RENDERABLE_EXTS.includes(ext);
       item.className = "tree-item" + (node.path === currentFile || node.path === previewRawFile ? " active" : "") + (node.ignored ? " ignored" : "");
+      item.tabIndex = 0;
+      item.dataset.path = node.path;
+      item.dataset.type = "file";
       item.innerHTML = `<span class="icon">📄</span><span class="name${node.ignored ? " ignored" : ""}">${node.name}</span>`;
       if (isRawFile) {
         item.addEventListener("click", () => selectPreviewRawFile(node.path));
@@ -1711,11 +1760,38 @@ window.runEditorCommand = (id) => {
   cmView.focus();
 };
 
+// ── App-level keybindings ─────────────────────────────────────────────────
+// Single source of truth for both the keydown handler and the Quick Help dialog.
+// eKey: the value of e.key when Ctrl is held; eKeyAlt: alternate e.key some
+// browsers report for the same physical key (e.g. Shift+Period → ">" or ".").
+// shift: whether Shift must also be held.
+const APP_KEYBINDINGS = [
+  { label: "Panels & navigation", items: [
+    { key: "Ctrl-'",       eKey: "'",  shift: false, label: "Preview",            desc: "Switch to the Preview panel",                         action: () => switchPanel("preview") },
+    { key: "Ctrl->",       eKey: ">",  shift: true,  label: "AI",                 desc: "Switch to the AI panel and focus the input",          action: () => { switchPanel("ai"); document.getElementById("ai-input")?.focus(); }, eKeyAlt: "." },
+    { key: "Ctrl-;",       eKey: ";",  shift: false, label: "Terminal",           desc: "Switch to the Terminal panel",                        action: () => { switchPanel("terminal"); initTerminal(); } },
+    { key: "Ctrl-:",       eKey: ":",  shift: true,  label: "Logs",               desc: "Switch to the Logs panel",                            action: () => switchPanel("logs") },
+    { key: "Ctrl-,",       eKey: ",",  shift: false, label: "Settings",           desc: "Switch to the Settings panel",                        action: () => switchPanel("settings") },
+    { key: "Ctrl-.",       eKey: ".",  shift: false, label: "Focus editor",       desc: "Move keyboard focus to the editor",                   action: () => cmView?.focus() },
+    { key: "Ctrl-l",       eKey: "l",  shift: false, label: "Focus file pane",    desc: "Move focus to the file browser, expanding if hidden", action: () => { if (document.getElementById("sidebar").classList.contains("collapsed")) toggleSidebar(); (document.querySelector(".tree-item.active") || document.querySelector(".tree-item"))?.focus(); } },
+    { key: "Ctrl-h",       eKey: "h",  shift: false, label: "Toggle file pane",   desc: "Show or hide the file browser",                       action: () => toggleSidebar() },
+    { key: "Ctrl-Shift-H", eKey: "H",  shift: true,  label: "Toggle right pane",  desc: "Show or hide the right panel",                        action: () => toggleRightPanel() },
+    { key: "Ctrl-?",       eKey: "?",  shift: true,  label: "Quick help",         desc: "Open this keybinding reference",                      action: () => openQuickHelp() },
+  ]},
+];
+
 window.openQuickHelp = () => {
   document.getElementById("viewMenu").classList.remove("open");
   const content = document.getElementById("quickHelpContent");
   if (!content.dataset.rendered) {
     let html = "";
+    APP_KEYBINDINGS.forEach(group => {
+      html += `<h4>${group.label}</h4><table>`;
+      group.items.forEach(item => {
+        html += `<tr><td class="key">${fmtKey(item)}</td><td>${item.label}</td><td class="desc">${item.desc}</td></tr>`;
+      });
+      html += `</table>`;
+    });
     EDIT_COMMAND_GROUPS.forEach(group => {
       html += `<h4>${group.label}</h4><table>`;
       group.items.forEach(item => {
@@ -1750,6 +1826,7 @@ window.switchPanel = (name) => {
   if (btn) btn.classList.add("active");
   const pane = document.getElementById(`panel-${name}`);
   if (pane) pane.classList.add("active");
+  if (name === "terminal") initTerminal();
 };
 
 // ── Preview ────────────────────────────────────────────────────────────────
@@ -1948,7 +2025,11 @@ window.syncWorkspace = async () => {
   if (res.ok) { alert("Pushed to GitHub successfully."); }
   else {
     const d = await res.json().catch(() => ({}));
-    alert("Sync failed: " + (d.detail || res.statusText));
+    if (res.status === 409 && d.detail?.type === "merge_conflict") {
+      alert("Sync failed: merge conflict.\n\n" + (d.detail.message || "").trim());
+    } else {
+      alert("Sync failed: " + extractDetail(d, res.statusText));
+    }
   }
 };
 
@@ -2654,6 +2735,144 @@ document.addEventListener("DOMContentLoaded", async () => {
     startLogsPolling();
   }
 });
+
+// ── Terminal ────────────────────────────────────────────────────────────────
+
+async function _loadTermDeps() {
+  if (_Terminal) return;
+  const [xtermMod, fitMod] = await Promise.all([
+    import("https://esm.sh/@xterm/xterm@5"),
+    import("https://esm.sh/@xterm/addon-fit@0"),
+  ]);
+  _Terminal = xtermMod.Terminal;
+  _FitAddon = fitMod.FitAddon;
+}
+
+function _connectTerminalWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/api/terminal/ws`);
+  ws.binaryType = "arraybuffer";
+  _termWs = ws;
+
+  ws.onopen = () => {
+    _termConnected = true;
+    if (_termFit) {
+      _termFit.fit();
+      const dims = _termFit.proposeDimensions();
+      if (dims) ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+    }
+    _term?.focus();
+  };
+
+  ws.onmessage = (e) => {
+    if (!_term) return;
+    if (e.data instanceof ArrayBuffer) {
+      _term.write(new Uint8Array(e.data));
+    } else {
+      _term.write(e.data);
+    }
+  };
+
+  ws.onclose = () => {
+    _termConnected = false;
+    _term?.write("\r\n\x1b[2m[disconnected — click ↺ to reconnect]\x1b[0m\r\n");
+  };
+
+  ws.onerror = () => {
+    _term?.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n");
+  };
+}
+
+window.initTerminal = async () => {
+  if (!workspaceLoaded) {
+    const el = document.getElementById("terminal-container");
+    if (el && !el.dataset.msgShown) {
+      el.innerHTML = '<div style="padding:0.75rem;color:var(--text2);font-size:0.8rem">Load a workspace first.</div>';
+      el.dataset.msgShown = "1";
+    }
+    return;
+  }
+
+  if (_term && _termWs && _termWs.readyState === WebSocket.OPEN) {
+    _termFit?.fit();
+    _term.focus();
+    return;
+  }
+
+  if (_term && (!_termWs || _termWs.readyState > WebSocket.OPEN)) {
+    _connectTerminalWS();
+    return;
+  }
+
+  await _loadTermDeps();
+
+  const container = document.getElementById("terminal-container");
+  container.innerHTML = "";
+  delete container.dataset.msgShown;
+
+  _term = new _Terminal({
+    cursorBlink: true,
+    fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+    fontSize: 13,
+    theme: { background: "#1a1a1a", foreground: "#d4d4d4", cursor: "#e8974a" },
+    convertEol: true,
+  });
+  _termFit = new _FitAddon();
+  _term.loadAddon(_termFit);
+  _term.open(container);
+  _termFit.fit();
+
+  _term.onData((data) => {
+    if (_termConnected && _termWs) {
+      _termWs.send(new TextEncoder().encode(data).buffer);
+    }
+  });
+
+  _term.onResize(({ cols, rows }) => {
+    if (_termConnected && _termWs) {
+      _termWs.send(JSON.stringify({ type: "resize", cols, rows }));
+    }
+  });
+
+  new ResizeObserver(() => { _termFit?.fit(); }).observe(container);
+
+  _connectTerminalWS();
+};
+
+window.restartTerminal = async () => {
+  if (_termWs) { _termWs.close(); _termWs = null; }
+  if (_term) { _term.dispose(); _term = null; _termFit = null; }
+  _termConnected = false;
+  const container = document.getElementById("terminal-container");
+  if (container) { container.innerHTML = ""; delete container.dataset.msgShown; }
+  await initTerminal();
+};
+
+// ── Keybindings ─────────────────────────────────────────────────────────────
+
+document.addEventListener("keydown", (e) => {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return;
+  for (const group of APP_KEYBINDINGS) {
+    for (const binding of group.items) {
+      if (!!binding.shift !== e.shiftKey) continue;
+      // if (e.key !== binding.eKey && e.key !== (binding.eKeyAlt ?? null)) continue;
+      if (e.key !== binding.eKey) continue;
+      e.preventDefault();
+      e.stopPropagation();
+      binding.action();
+      return;
+    }
+  }
+}, true);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Delete") return;
+  const el = document.activeElement;
+  if (!el?.classList.contains("tree-item") || !el.dataset.path) return;
+  e.preventDefault();
+  _contextTarget = { path: el.dataset.path, type: el.dataset.type };
+  deleteContextTarget();
+}, true);
 </script>
 {% endraw %}
 </body>

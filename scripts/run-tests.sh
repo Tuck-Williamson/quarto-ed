@@ -50,8 +50,67 @@ docker build \
 
 # ── Run tests ────────────────────────────────────────────────────────────────
 if $RUN; then
-  echo "=== Running tests ==="
-  docker run --rm app:test
+  # Persistent results directory — kept after the run for inspection.
+  # Cleared at the start of each run so stale artifacts never accumulate.
+  RESULTS_DIR="$SCRIPT_DIR/test-results"
+  rm -rf "$RESULTS_DIR"
+  mkdir -p "$RESULTS_DIR"
+  chmod 777 "$RESULTS_DIR"   # allow non-root testrunner to write in pass 2
+
+  # Pass 1 (root): full suite.  requires_root sandbox tests run; requires_non_root skip.
+  # Coverage data written to .coverage.1 so pass-2 data can be combined separately.
+  echo "=== Running tests (pass 1 of 2: root) ==="
+  docker run --rm \
+    -e COVERAGE_FILE=/test-results/.coverage.1 \
+    -v "$RESULTS_DIR:/test-results" \
+    app:test \
+    python3.11 -m pytest tests/ \
+      --junit-xml=/test-results/pass1.xml \
+      --cov=app --cov-report= \
+      --tb=short -q
   echo ""
-  echo "All tests passed."
+
+  # Pass 2 (non-root): security module only.  requires_non_root tests now run.
+  # Run the full module without a name filter so all requires_non_root tests fire.
+  echo "=== Running tests (pass 2 of 2: non-root sandbox tests) ==="
+  docker run --rm --user testrunner \
+    -e COVERAGE_FILE=/test-results/.coverage.2 \
+    -v "$RESULTS_DIR:/test-results" \
+    app:test \
+    python3.11 -m pytest /app/tests/test_security.py \
+      --junit-xml=/test-results/pass2.xml \
+      --cov=app --cov-report= \
+      -p no:cacheprovider --tb=short -q --rootdir=/app
+  echo ""
+
+  # ── Combined coverage ──────────────────────────────────────────────────────
+  # Merge the two coverage data files and emit a single combined report.
+  # The source files live at /app inside the image, so we run from there.
+  echo "=== Combined coverage ==="
+  docker run --rm \
+    -w /app \
+    -v "$RESULTS_DIR:/test-results" \
+    app:test \
+    bash -c "
+      coverage combine \
+        --data-file /test-results/.coverage \
+        /test-results/.coverage.1 \
+        /test-results/.coverage.2 \
+      && coverage report \
+           --data-file /test-results/.coverage \
+           -m \
+      && coverage xml \
+           --data-file /test-results/.coverage \
+           -o /test-results/coverage.xml \
+           -q
+    "
+  echo ""
+  echo "  Coverage XML → $RESULTS_DIR/coverage.xml"
+  echo ""
+
+  # ── Per-test summary table ─────────────────────────────────────────────────
+  python3 "$SCRIPT_DIR/summarize_test_results.py" \
+    "$RESULTS_DIR/pass1.xml" \
+    "$RESULTS_DIR/pass2.xml"
+
 fi

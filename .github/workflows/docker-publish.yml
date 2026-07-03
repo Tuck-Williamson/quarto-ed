@@ -103,7 +103,7 @@ jobs:
         run: docker build -f Dockerfile.test --build-arg BASE_IMAGE=app:ci -t app:test .
 
       - name: Run tests
-        run: docker run --rm app:test
+        run: docker run --rm -e CI app:test
 
       - name: Cache Trivy Vulnerability DB
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -186,8 +186,13 @@ jobs:
       - name: Bump patch version
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          VERSION_BUMP_TOKEN: ${{ secrets.VERSION_BUMP_TOKEN }}
+          GH_TOKEN: ${{ secrets.VERSION_BUMP_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::VERSION_BUMP_TOKEN secret not set — skipping version bump." \
+              "Create a fine-grained PAT (Contents: read+write) and add it as a repo secret."
+            exit 0
+          fi
           CURRENT=${{ steps.meta-vars.outputs.APP_VERSION }}
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
           MINOR=$(echo "$CURRENT" | cut -d. -f2)
@@ -198,11 +203,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add app/__init__.py
           git commit -m "chore: bump version ${CURRENT} → ${NEW} [skip ci]"
-          if [ -z "$VERSION_BUMP_TOKEN" ]; then
-            echo "::error::VERSION_BUMP_TOKEN secret not set. Create a fine-grained PAT" \
-              "(Contents: read+write for this repo) and add it as a repo secret."
-            exit 1
-          fi
+          BUMP_BRANCH="auto-bump-v${NEW}"
           git remote set-url origin \
-            "https://x-access-token:${VERSION_BUMP_TOKEN}@github.com/${{ github.repository }}"
-          git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main)
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+          git checkout -b "$BUMP_BRANCH"
+          git push origin "$BUMP_BRANCH"
+          gh pr create \
+            --title "chore: bump version ${CURRENT} → ${NEW} [skip ci]" \
+            --body "Automated patch version bump." \
+            --base main --head "$BUMP_BRANCH"
+          gh pr merge "$BUMP_BRANCH" --admin --merge
+          git push origin --delete "$BUMP_BRANCH" || true
