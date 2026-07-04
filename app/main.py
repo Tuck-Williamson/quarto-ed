@@ -68,11 +68,11 @@ _CONTENT_SECURITY_POLICY = "; ".join([
     "img-src 'self' data: blob:",
     "font-src 'self' https://fonts.gstatic.com data:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
-    "script-src 'self' 'unsafe-inline' https://esm.sh",
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
     "worker-src 'self' blob:",
     "frame-src 'self'",
     " ".join(filter(None, [
-        "connect-src 'self' https://esm.sh http://localhost:11434 http://127.0.0.1:11434",
+        "connect-src 'self' https://cdn.jsdelivr.net http://localhost:11434 http://127.0.0.1:11434",
         _CSP_CONNECT_EXTRA,
     ])),
 ])

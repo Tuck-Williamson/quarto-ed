@@ -606,25 +606,42 @@ window._tpl = {
 };
 </script>
 {% raw %}
+<script type="importmap">
+{
+  "imports": {
+    "codemirror": "https://cdn.jsdelivr.net/npm/codemirror@6.0.1/+esm",
+    "@codemirror/state": "https://cdn.jsdelivr.net/npm/@codemirror/state@6/+esm",
+    "@codemirror/view": "https://cdn.jsdelivr.net/npm/@codemirror/view@6/+esm",
+    "@codemirror/lang-markdown": "https://cdn.jsdelivr.net/npm/@codemirror/lang-markdown@6/+esm",
+    "@codemirror/language-data": "https://cdn.jsdelivr.net/npm/@codemirror/language-data@6/+esm",
+    "@codemirror/theme-one-dark": "https://cdn.jsdelivr.net/npm/@codemirror/theme-one-dark@6/+esm",
+    "@codemirror/autocomplete": "https://cdn.jsdelivr.net/npm/@codemirror/autocomplete@6/+esm",
+    "@codemirror/commands": "https://cdn.jsdelivr.net/npm/@codemirror/commands@6/+esm",
+    "@codemirror/search": "https://cdn.jsdelivr.net/npm/@codemirror/search@6/+esm",
+    "@codemirror/language": "https://cdn.jsdelivr.net/npm/@codemirror/language@6/+esm",
+    "@codemirror/lint": "https://cdn.jsdelivr.net/npm/@codemirror/lint@6/+esm",
+    "ansi_up": "https://cdn.jsdelivr.net/npm/ansi_up@5/+esm"
+  }
+}
+</script>
+
 <script type="module">
 // ── CodeMirror 6 imports ───────────────────────────────────────────────────
-import { EditorView, basicSetup } from "https://esm.sh/codemirror@6.0.1";
-import { EditorState } from "https://esm.sh/@codemirror/state@6";
-import { markdown, markdownLanguage } from "https://esm.sh/@codemirror/lang-markdown@6";
-import { languages } from "https://esm.sh/@codemirror/language-data@6";
-import { oneDark } from "https://esm.sh/@codemirror/theme-one-dark@6";
-import { EditorView as EV } from "https://esm.sh/@codemirror/view@6";
-import { autocompletion, snippetCompletion, startCompletion,
-         completionKeymap } from "https://esm.sh/@codemirror/autocomplete@6";
-import { keymap } from "https://esm.sh/@codemirror/view@6";
+import { EditorView, basicSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { EditorView as EV, keymap } from "@codemirror/view";
+import { autocompletion, snippetCompletion, startCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { indentWithTab, undo, redo, toggleComment, toggleBlockComment,
          indentMore, indentLess, moveLineUp, moveLineDown, copyLineDown,
-         deleteLine, selectParentSyntax } from "https://esm.sh/@codemirror/commands@6";
+         deleteLine, selectParentSyntax } from "@codemirror/commands";
 import { openSearchPanel, findNext, findPrevious, gotoLine,
-         selectNextOccurrence, selectSelectionMatches } from "https://esm.sh/@codemirror/search@6";
-import { foldCode, unfoldCode, foldAll, unfoldAll } from "https://esm.sh/@codemirror/language@6";
-import { openLintPanel, nextDiagnostic } from "https://esm.sh/@codemirror/lint@6";
-import AnsiUp from "https://esm.sh/ansi_up@5";
+         selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
+import { foldCode, unfoldCode, foldAll, unfoldAll } from "@codemirror/language";
+import { openLintPanel, nextDiagnostic } from "@codemirror/lint";
+import AnsiUp from "ansi_up";
 
 // ── State ──────────────────────────────────────────────────────────────────
 let cmView = null;
