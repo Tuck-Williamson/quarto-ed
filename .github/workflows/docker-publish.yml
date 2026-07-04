@@ -201,6 +201,7 @@ jobs:
           sed -i "s/__version__ = [\"']${CURRENT}[\"']/__version__ = \"${NEW}\"/" app/__init__.py
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull
           git add app/__init__.py
           git commit -m "chore: bump version ${CURRENT} → ${NEW} [skip ci]"
           BUMP_BRANCH="auto-bump-v${NEW}"
