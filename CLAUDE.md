@@ -84,21 +84,31 @@ Owns all quarto preview lifecycle:
 - Settings API: reads/writes `settings.json` + `snippets.json` in a per-user GitHub repo (`{username}-quarto-ed-settings`), auto-cloned on access, pushed on every save.
 - AI chat: streams Anthropic API via `httpx.AsyncClient.stream()` → `StreamingResponse(text/event-stream)`.
 
-### Frontend styling (Tailwind)
+### Frontend build (Tailwind + esbuild)
 
-Styling is Tailwind CSS compiled by a real build step — no runtime CDN. Source is
-`app/static/src/input.css` (theme in `tailwind.config.js`); reused components are
-authored utility-first with `@apply`, and the palette lives in CSS custom
-properties so the light/dark toggle keeps working. The `cssbuilder` stage in the
-`Dockerfile` runs `tailwindcss --minify` → `app/static/app.css`, served at
-`/static/app.css` (FastAPI `StaticFiles`, mounted in `app/main.py`). The compiled
-CSS is a build artifact (git-ignored); regenerate locally with `npm run build:css`
-(or `npm run watch:css`). Because CSS is precompiled, the CSP drops
-`cdn.tailwindcss.com` and `'unsafe-eval'`.
+Both CSS and JS are compiled by a real build step (the `assets` stage in the
+`Dockerfile`, `node:20-slim`) and served from `/static` — no runtime CDN. Config
+in `package.json` (`npm run build` = `build:css` + `build:js`); outputs are
+build artifacts (git-ignored), regenerate locally with `npm run build`.
+
+- **CSS** — `app/static/src/input.css` (theme in `tailwind.config.js`) →
+  `tailwindcss --minify` → `app/static/app.css`. Components authored utility-first
+  with `@apply`; palette in CSS custom properties so the light/dark toggle works.
+- **JS** — `app/static/src/editor.js` (the editor SPA module) →
+  `esbuild --bundle --minify --splitting` → `app/static/dist/` (entry
+  `editor.js` + code-split language chunks + `editor.css` from the imported xterm
+  stylesheet). Bundling gives esbuild a single deduped `@codemirror/state`
+  instance (the CDN import map served three conflicting versions → "multiple
+  instances" errors) and keeps CodeMirror/xterm/ansi_up local.
+
+`StaticFiles` is mounted at `/static` in `app/main.py`. Because everything is
+local, the CSP needs no script/style CDN origins (only Google Fonts + a
+browser-direct Ollama endpoint remain) and drops `'unsafe-eval'`.
 
 ### Editor SPA (`app/templates/editor.html`)
 
-Three-pane layout (CodeMirror 6 loaded via `esm.sh` CDN ESM; CSS via the Tailwind build above):
+Three-pane layout (CodeMirror 6 + xterm bundled locally via esbuild — see the
+frontend build above; source lives in `app/static/src/editor.js`):
 - **Left**: collapsible file browser (tree), "+ New file" button
 - **Center**: CodeMirror 6 editor with tabs, dirty indicator, CTRL+S to save
 - **Right**: switchable Preview (iframe → `/api/preview/`) / AI Chat (SSE) / Settings

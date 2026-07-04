@@ -13,5 +13,7 @@ scripts/test-results/
 # Node / Tailwind build
 node_modules/
 package-lock.json
-# Compiled CSS is a build artifact (produced by the cssbuilder Docker stage)
+# Compiled frontend assets are build artifacts (produced by the assets Docker
+# stage / `npm run build`).
 app/static/app.css
+app/static/dist/

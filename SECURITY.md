@@ -40,12 +40,14 @@ app only for trusted users (`ALLOWED_GITHUB_USERS`).
 ## Browser hardening
 
 App pages are served with a `Content-Security-Policy` plus `X-Frame-Options`,
-`X-Content-Type-Options`, and `Referrer-Policy` headers (see `app/main.py`). The
-CSP restricts script/style/connect origins to the CDNs the editor actually uses
-and blocks exfiltration to arbitrary hosts. It is intentionally *not* applied to
-the quarto preview proxy (`/api/preview/*`), whose rendered output ships its own
-CDN assets. A browser-direct Ollama endpoint other than `localhost:11434`
-requires adding its origin via the `CSP_CONNECT_SRC_EXTRA` env var.
+`X-Content-Type-Options`, and `Referrer-Policy` headers (see `app/main.py`). All
+JS and CSS are compiled locally (esbuild + Tailwind) and served from `'self'`, so
+the CSP needs no script/style CDN origins — the only external origins are Google
+Fonts and a browser-direct Ollama endpoint, and exfiltration to arbitrary hosts
+is blocked. It is intentionally *not* applied to the quarto preview proxy
+(`/api/preview/*`), whose rendered output ships its own CDN assets. A
+browser-direct Ollama endpoint other than `localhost:11434` requires adding its
+origin via the `CSP_CONNECT_SRC_EXTRA` env var.
 
 ## Supported Versions
 

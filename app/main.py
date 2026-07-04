@@ -46,12 +46,13 @@ app.mount(
 )
 
 # ── Security response headers ────────────────────────────────────────────────
-# The Content-Security-Policy is scoped to the app's own pages. Styles are now
-# served from /static (self); the only remaining external origins are esm.sh
-# (CodeMirror/xterm ES modules), Google Fonts, jsdelivr (xterm CSS), and a
-# browser-direct Ollama endpoint. 'unsafe-inline' is still needed for the inline
-# event handlers and for the inline styles CodeMirror/xterm inject at runtime;
-# 'unsafe-eval' and the Tailwind Play CDN are gone now that CSS is precompiled.
+# The Content-Security-Policy is scoped to the app's own pages. All JS/CSS is now
+# compiled locally and served from /static ('self') — the CodeMirror/xterm/ansi_up
+# CDN + import map are gone, so no script/style CDN origins are needed. The only
+# remaining external origins are Google Fonts (stylesheet + font files) and a
+# browser-direct Ollama endpoint. 'unsafe-inline' is still required for the inline
+# event handlers and the window._tpl config script in editor.html, and for the
+# inline styles CodeMirror/xterm inject at runtime.
 #
 # CSP is deliberately NOT applied to the quarto preview proxy (/api/preview/*)
 # or raw file serving (/api/file/raw): that content is rendered by quarto and
@@ -67,12 +68,12 @@ _CONTENT_SECURITY_POLICY = "; ".join([
     "form-action 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self' https://fonts.gstatic.com data:",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' 'unsafe-inline'",
     "worker-src 'self' blob:",
     "frame-src 'self'",
     " ".join(filter(None, [
-        "connect-src 'self' https://cdn.jsdelivr.net http://localhost:11434 http://127.0.0.1:11434",
+        "connect-src 'self' http://localhost:11434 http://127.0.0.1:11434",
         _CSP_CONNECT_EXTRA,
     ])),
 ])
