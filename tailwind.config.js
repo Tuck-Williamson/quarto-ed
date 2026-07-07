@@ -1,8 +1,14 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  // Scan the templates (including their inline JS, which emits class-bearing
-  // markup) so utilities and @apply-referenced classes are generated/kept.
-  content: ["./app/templates/**/*.html"],
+  // Scan the templates AND the editor JS bundle source. The file tree, tabs,
+  // dropdowns, etc. are built in app/static/src/editor.js and their classes
+  // (e.g. `tree-children`, the `hidden` collapse state) never appear in the
+  // HTML — without scanning the JS, Tailwind purges those component rules and
+  // the `.hidden` utility, so collapsed folders won't hide their contents.
+  content: [
+    "./app/templates/**/*.html",
+    "./app/static/src/**/*.js",
+  ],
   theme: {
     extend: {
       // Palette is driven by CSS custom properties (defined in input.css) so the
