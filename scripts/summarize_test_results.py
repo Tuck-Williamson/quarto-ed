@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Print a colour-coded per-test summary table from two pytest JUnit XML files.
+Print a colour-coded per-test summary table from one or more pytest JUnit XML
+files (one per parallel pass). Missing files are treated as empty, so a pass
+that produced no XML simply contributes no rows.
 
 Usage:
-    python3 scripts/summarize_test_results.py pass1.xml pass2.xml
+    python3 scripts/summarize_test_results.py pass1.xml [pass2.xml ...]
 
 Exit codes:
     0 — all tests passed (or only skipped)
@@ -56,14 +58,14 @@ def row_color(passes, fails):
 
 
 def main():
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} pass1.xml pass2.xml", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} pass1.xml [pass2.xml ...]", file=sys.stderr)
         sys.exit(2)
 
-    p1 = load(sys.argv[1])
-    p2 = load(sys.argv[2])
+    # (stage_number, {nodeid: outcome}) for each JUnit XML passed on the CLI.
+    stages = [(i, load(path)) for i, path in enumerate(sys.argv[1:], start=1)]
 
-    all_ids = sorted(set(list(p1) + list(p2)))
+    all_ids = sorted({nid for _, d in stages for nid in d})
     if not all_ids:
         print("No test results found.")
         return
@@ -82,9 +84,9 @@ def main():
     totals = {"pass": 0, "fail": 0, "skip_only": 0}
     for nid in all_ids:
         name   = nid.split("::")[-1]
-        passes = [s for s, d in ((1, p1), (2, p2)) if d.get(nid) == "passed"]
-        fails  = [s for s, d in ((1, p1), (2, p2)) if d.get(nid) == "failed"]
-        skips  = [s for s, d in ((1, p1), (2, p2)) if d.get(nid) == "skipped"]
+        passes = [s for s, d in stages if d.get(nid) == "passed"]
+        fails  = [s for s, d in stages if d.get(nid) == "failed"]
+        skips  = [s for s, d in stages if d.get(nid) == "skipped"]
 
         clr  = row_color(passes, fails)
         line = f"| {name:<{name_w}} | {fmt(passes):^{col_w}} | {fmt(fails):^{col_w}} | {fmt(skips):^{col_w}} |"

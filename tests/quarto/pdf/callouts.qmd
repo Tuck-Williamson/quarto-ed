@@ -1,0 +1,29 @@
+---
+title: "Callouts in PDF"
+author: "Test Suite"
+date: today
+format: pdf
+---
+
+# Callout Blocks
+
+Quarto renders callouts through a LaTeX environment; this exercises that path.
+
+::: {.callout-note}
+This is a note callout.
+:::
+
+::: {.callout-warning}
+This is a warning callout with **bold** text.
+:::
+
+::: {.callout-tip title="A Tip"}
+A tip callout with a custom title and a list:
+
+- point one
+- point two
+:::
+
+::: {.callout-important}
+An important callout to round out the set.
+:::

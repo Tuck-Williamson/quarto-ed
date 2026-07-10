@@ -33,13 +33,35 @@ RUN /opt/quarto/bin/quarto install verapdf --no-prompt
 RUN /opt/quarto/bin/quarto install chrome-headless-shell --no-prompt 
 
 # TinyTeX (installs to /root/.TinyTeX; quarto finds it automatically)
+# Beyond tagpdf/luamml, pre-install the LaTeX packages Quarto needs to render
+# callout blocks to PDF (tcolorbox + its deps, fontawesome5 icons, luatexbase).
+# Without these, `quarto render --to pdf` on a callout doc triggers an on-demand
+# tlmgr install that fails in an offline container.
 RUN /opt/quarto/bin/quarto install tinytex --no-prompt \
     && /root/.TinyTeX/bin/x86_64-linux/tlmgr update --self \
-    && /root/.TinyTeX/bin/x86_64-linux/tlmgr install tagpdf luamml
+    && /root/.TinyTeX/bin/x86_64-linux/tlmgr install \
+        tagpdf luamml \
+        tcolorbox pgf environ trimspaces fontawesome5 luatexbase etoolbox
 
 # Python dependencies
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt
+
+# ── Stage: frontend assets build (Tailwind CSS + esbuild JS) ──────────────────
+# build:css → app/static/app.css (minified, purged against the templates),
+#             replacing the runtime cdn.tailwindcss.com Play CDN.
+# build:js  → app/static/dist/ (esbuild bundle of app/static/src/editor.js:
+#             CodeMirror/xterm/ansi_up, deduped to single instances, code-split
+#             so language modes load on demand). Replaces the esm.sh/jsdelivr
+#             ESM CDN + import map, so all scripts are served from 'self'.
+FROM node:20-slim AS assets
+WORKDIR /build
+COPY package.json ./
+RUN npm install --no-audit --no-fund --loglevel=error
+COPY tailwind.config.js ./
+COPY app/static/src ./app/static/src
+COPY app/templates ./app/templates
+RUN npm run build:css && npm run build:js
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -69,6 +91,11 @@ COPY --from=builder /root/.local/share/ /root/.local/share/
 COPY app /app/app
 COPY docker /app/docker
 
+# Compiled frontend assets from the assets stage: Tailwind CSS (/static/app.css)
+# and the esbuild bundle + code-split chunks (/static/dist/…).
+COPY --from=assets /build/app/static/app.css /app/app/static/app.css
+COPY --from=assets /build/app/static/dist /app/app/static/dist
+
 RUN mkdir -p /workspace /var/log/supervisor \
     && chmod +x /app/docker/entrypoint.sh
 
@@ -93,8 +120,8 @@ RUN chmod o+x /root \
     && chmod -R o+rX /root/.TinyTeX /opt/quarto \
         /usr/local/lib/python3.11/dist-packages \
         /usr/lib/R/library /usr/local/lib/R/site-library \
-	/root/.local/share/\
-    && chmod -R o-rwx /app
+	/root/.local/share/
+RUN chmod -R o-rwx /app
 
 WORKDIR /app
 

@@ -9,3 +9,11 @@ build/
 .venv/
 venv/
 scripts/test-results/
+
+# Node / Tailwind build
+node_modules/
+package-lock.json
+# Compiled frontend assets are build artifacts (produced by the assets Docker
+# stage / `npm run build`).
+app/static/app.css
+app/static/dist/

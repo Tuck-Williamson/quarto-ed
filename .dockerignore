@@ -1,0 +1,21 @@
+# Build context hygiene. NOTE: shared by both Dockerfile and Dockerfile.test —
+# do NOT exclude tests/ or pytest.ini (the test image copies them).
+
+# Node deps + compiled frontend artifacts: the `assets` stage installs and
+# builds these itself, so a local copy must never enter the context/image.
+node_modules/
+app/static/dist/
+app/static/app.css
+
+# VCS / local dev cruft
+.git/
+.github/
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+scripts/test-results/
+screenshot.png

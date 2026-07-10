@@ -55,7 +55,7 @@ async def test_ai_inline_unauthenticated(anon_client):
 async def test_get_ai_config_defaults_when_no_row(auth_client, monkeypatch):
     """Without a user_ai_config row, has_key=False and server_key_active reflects env."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     resp = await auth_client.get("/api/ai/config")
     assert resp.status_code == 200
@@ -71,7 +71,7 @@ async def test_get_ai_config_defaults_when_no_row(auth_client, monkeypatch):
 async def test_get_ai_config_reflects_server_key(auth_client, monkeypatch):
     """When server ANTHROPIC_API_KEY is set but no user key, server_key_active is True and has_key is False."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-key")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server-key")
 
     resp = await auth_client.get("/api/ai/config")
     assert resp.status_code == 200
@@ -274,7 +274,7 @@ async def _fake_anthropic_stream():
 async def test_ai_chat_returns_503_when_no_key(auth_client, monkeypatch):
     """Without a key (no server key, no user key), /api/ai/chat returns 503."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     resp = await auth_client.post("/api/ai/chat", json={"message": "hello"})
     assert resp.status_code == 503
@@ -283,7 +283,7 @@ async def test_ai_chat_returns_503_when_no_key(auth_client, monkeypatch):
 async def test_ai_chat_uses_user_key(auth_client, test_user, db_session, monkeypatch):
     """When user has a stored Claude key, /api/ai/chat uses it (not the server env)."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")   # no server key
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")   # no server key
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -319,7 +319,7 @@ async def test_ai_chat_uses_user_key(auth_client, test_user, db_session, monkeyp
 async def test_ai_chat_passes_custom_system_prompt(auth_client, test_user, db_session, monkeypatch):
     """system_prompt from the request body is forwarded to Anthropic."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     captured = {}
 
@@ -353,7 +353,7 @@ async def test_ai_chat_uses_default_system_prompt_when_none_provided(
 ):
     """When no system_prompt is in the request, the default chatSystemPrompt is used."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     captured = {}
 
@@ -393,7 +393,7 @@ async def test_ai_chat_rejects_ollama_provider(auth_client):
 
 async def test_ai_inline_returns_503_when_no_key(auth_client, monkeypatch):
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     resp = await auth_client.post("/api/ai/inline", json={"prompt": "rewrite this"})
     assert resp.status_code == 503
@@ -402,7 +402,7 @@ async def test_ai_inline_returns_503_when_no_key(auth_client, monkeypatch):
 async def test_ai_inline_returns_text(auth_client, test_user, db_session, monkeypatch):
     """Successful inline call returns {"text": "..."}."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -441,7 +441,7 @@ async def test_ai_inline_passes_selection_in_user_content(
 ):
     """The selection text is wrapped in <selection> tags in the user message."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -483,7 +483,7 @@ async def test_ai_inline_uses_custom_system_prompt(
 ):
     """system_prompt in the request body is forwarded to Anthropic."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     captured = {}
 
@@ -523,7 +523,7 @@ async def test_ai_inline_rejects_ollama_provider(auth_client):
 async def test_ai_inline_without_selection(auth_client, monkeypatch):
     """When no selection is provided, the prompt is sent as-is without <selection> tags."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     captured = {}
 
@@ -557,7 +557,7 @@ async def test_ai_inline_without_selection(auth_client, monkeypatch):
 async def test_get_user_api_key_falls_back_to_server_env(test_user, monkeypatch):
     """When no user_ai_config row exists, falls back to the server API key env var."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-fallback")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server-fallback")
 
     api_key = await proxy_mod._get_user_api_key(test_user.id)
     assert api_key == "sk-server-fallback"
@@ -566,7 +566,7 @@ async def test_get_user_api_key_falls_back_to_server_env(test_user, monkeypatch)
 async def test_get_user_api_key_uses_user_row(test_user, db_session, monkeypatch):
     """When a user row exists with a stored key, it is decrypted and returned."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-should-not-be-used")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server-should-not-be-used")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -585,7 +585,7 @@ async def test_get_user_api_key_no_stored_key_falls_back_to_server(
 ):
     """A row with no stored key falls back to the server env var."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-backup")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server-backup")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -604,7 +604,7 @@ async def test_get_user_api_key_decrypt_failure_falls_back_to_server(
 ):
     """If stored key is undecryptable (e.g. after key rotation), falls back to server key."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server-fallback")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server-fallback")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -623,7 +623,7 @@ async def test_save_ai_config_switching_to_ollama_clears_claude_key(
 ):
     """Switching provider from claude to ollama must clear the stored API key."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -648,7 +648,7 @@ async def test_ai_inline_empty_content_list_returns_empty_text(
 ):
     """Anthropic returning empty content list must return '' not crash with IndexError."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     class FakeResponse:
         status_code = 200
@@ -677,7 +677,7 @@ async def test_settings_defaults_include_prompt_and_ai_fields(auth_client, monke
     async def _mock_ensure_cloned(_user_id, _username, _token):
         return False
 
-    monkeypatch.setattr(proxy, "_ensure_settings_cloned", _mock_ensure_cloned)
+    monkeypatch.setattr(proxy._core, "_ensure_settings_cloned", _mock_ensure_cloned)
 
     resp = await auth_client.get("/api/settings")
     assert resp.status_code == 200
@@ -709,7 +709,7 @@ async def test_custom_system_prompts_are_saved_and_returned(
         })
     )
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     resp = await auth_client.get("/api/settings")
     assert resp.status_code == 200
@@ -728,12 +728,12 @@ async def test_prompt_fields_are_persisted_via_post_settings(
     settings_dir.mkdir(parents=True)
     (settings_dir / ".git").mkdir()
 
-    monkeypatch.setattr(proxy, "_WORKSPACE_BASE", str(tmp_path))
+    monkeypatch.setattr(proxy._core, "_WORKSPACE_BASE", str(tmp_path))
 
     async def _noop_push(_path, _msg=""):
         pass
 
-    monkeypatch.setattr(proxy, "_push_settings", _noop_push)
+    monkeypatch.setattr(proxy._core, "_push_settings", _noop_push)
 
     custom_settings = {
         "theme": "dark",
@@ -755,7 +755,7 @@ async def test_prompt_fields_are_persisted_via_post_settings(
 async def test_editor_ai_enabled_with_server_key(auth_client, monkeypatch):
     """ai_enabled is True in template context when server ANTHROPIC_API_KEY is set."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "sk-server")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "sk-server")
 
     resp = await auth_client.get("/editor")
     assert resp.status_code == 200
@@ -769,7 +769,7 @@ async def test_editor_ai_enabled_with_user_key(
 ):
     """ai_enabled is True when user has a stored key, even if no server key."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     cfg = UserAIConfig(
         user_id=test_user.id,
@@ -787,7 +787,7 @@ async def test_editor_ai_enabled_with_user_key(
 async def test_editor_ai_tab_always_present(auth_client, monkeypatch):
     """The AI tab is always present in the HTML regardless of ai_enabled value."""
     import app.proxy as proxy_mod
-    monkeypatch.setattr(proxy_mod, "_ANTHROPIC_KEY", "")
+    monkeypatch.setattr(proxy_mod._core, "_ANTHROPIC_KEY", "")
 
     resp = await auth_client.get("/editor")
     assert resp.status_code == 200

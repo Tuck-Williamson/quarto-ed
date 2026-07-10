@@ -1,6 +1,7 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import update
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -34,6 +35,63 @@ if _ALLOWED_ORIGIN:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type"],
     )
+
+# Serve the compiled Tailwind CSS (and any future static assets) at /static.
+# Built into the image by the cssbuilder Docker stage; the directory always
+# exists in source (app/static/src/), so the mount is valid in tests too.
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="static",
+)
+
+# ── Security response headers ────────────────────────────────────────────────
+# The Content-Security-Policy is scoped to the app's own pages. All JS/CSS is now
+# compiled locally and served from /static ('self') — the CodeMirror/xterm/ansi_up
+# CDN + import map are gone, so no script/style CDN origins are needed. The only
+# remaining external origins are Google Fonts (stylesheet + font files) and a
+# browser-direct Ollama endpoint. 'unsafe-inline' is still required for the inline
+# event handlers and the window._tpl config script in editor.html, and for the
+# inline styles CodeMirror/xterm inject at runtime.
+#
+# CSP is deliberately NOT applied to the quarto preview proxy (/api/preview/*)
+# or raw file serving (/api/file/raw): that content is rendered by quarto and
+# may reference its own CDN assets (bootstrap, fontawesome, mathjax). Our app
+# policy would break it. Those responses are same-origin and still framed only
+# by the same-origin editor (X-Frame-Options: SAMEORIGIN).
+_CSP_CONNECT_EXTRA = os.environ.get("CSP_CONNECT_SRC_EXTRA", "").strip()
+_CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' 'unsafe-inline'",
+    "worker-src 'self' blob:",
+    "frame-src 'self'",
+    " ".join(filter(None, [
+        "connect-src 'self' http://localhost:11434 http://127.0.0.1:11434",
+        _CSP_CONNECT_EXTRA,
+    ])),
+])
+
+_CSP_EXEMPT_PREFIXES = ("/api/preview", "/api/file/raw")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    path = request.url.path
+    if not any(path.startswith(p) for p in _CSP_EXEMPT_PREFIXES):
+        response.headers.setdefault("Content-Security-Policy", _CONTENT_SECURITY_POLICY)
+    return response
+
 
 app.include_router(auth_router)
 app.include_router(proxy_router)

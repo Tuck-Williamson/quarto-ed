@@ -4,69 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>quarto-ed — Login</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0d1117;
-      color: #c9d1d9;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-    }
-    .card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 2.5rem;
-      width: 340px;
-      text-align: center;
-    }
-    .logo { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.5rem; color: #f0f6fc; }
-    .subtitle { font-size: 0.875rem; color: #8b949e; margin-bottom: 2rem; }
-    .btn-github {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.6rem;
-      background: #238636;
-      color: #ffffff;
-      text-decoration: none;
-      padding: 0.65rem 1.4rem;
-      border-radius: 6px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      transition: background 0.15s;
-    }
-    .btn-github:hover { background: #2ea043; }
-    .warning {
-      margin-top: 1.5rem;
-      font-size: 0.78rem;
-      color: #8b949e;
-      border-top: 1px solid #30363d;
-      padding-top: 1rem;
-    }
-    .error {
-      margin-bottom: 1.5rem;
-      font-size: 0.85rem;
-      color: #f85149;
-      background: #2d1214;
-      border: 1px solid #f85149;
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-    }
-  </style>
+  <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
-  <div class="card">
-    <div class="logo">quarto-ed</div>
-    <div class="subtitle">Edit Quarto documents in your browser</div>
+<body class="flex min-h-screen items-center justify-center bg-[#0d1117] font-sans text-[#c9d1d9]">
+  <div class="w-[340px] rounded-lg border border-[#30363d] bg-[#161b22] p-10 text-center">
+    <div class="mb-2 text-2xl font-bold text-[#f0f6fc]">quarto-ed</div>
+    <div class="mb-8 text-sm text-[#8b949e]">Edit Quarto documents in your browser</div>
     {% if request.query_params.get("error") == "access_denied" %}
-    <div class="error">
+    <div class="mb-6 rounded-md border border-[#f85149] bg-[#2d1214] px-4 py-3 text-[0.85rem] text-[#f85149]">
       This GitHub account isn't authorized to use this instance.
     </div>
     {% endif %}
-    <a class="btn-github" href="/auth/github">
+    <a class="inline-flex items-center gap-[0.6rem] rounded-md bg-[#238636] px-[1.4rem] py-[0.65rem] text-[0.9rem] font-semibold text-white no-underline transition-colors hover:bg-[#2ea043]"
+       href="/auth/github">
       <svg height="18" viewBox="0 0 16 16" fill="currentColor">
         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
           0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
@@ -79,7 +29,7 @@
       </svg>
       Sign in with GitHub
     </a>
-    <p class="warning">
+    <p class="mt-6 border-t border-[#30363d] pt-4 text-[0.78rem] text-[#8b949e]">
       ⚠ Unsaved workspace edits are lost when the server restarts.<br>
       Use <strong>Sync to GitHub</strong> in the editor to save your work.
     </p>
