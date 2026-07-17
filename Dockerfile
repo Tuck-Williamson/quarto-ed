@@ -1,4 +1,4 @@
-# ── Stage 1: builder ──────────────────────────────────────────────────────────
+# ── Stage 1: builder ─────────────────────────────────────────────────────────[...]
 FROM debian:bookworm-slim AS builder
 
 ARG QUARTO_VERSION=1.9.38
@@ -63,7 +63,7 @@ COPY app/static/src ./app/static/src
 COPY app/templates ./app/templates
 RUN npm run build:css && npm run build:js
 
-# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────[...]
 FROM debian:bookworm-slim
 
 ARG GIT_SHA=unknown
@@ -73,7 +73,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     GIT_SHA=$GIT_SHA
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3-pip git openssh-client ca-certificates \
         supervisor r-base libgnutls30 default-jre \
     && rm -rf /var/lib/apt/lists/*
