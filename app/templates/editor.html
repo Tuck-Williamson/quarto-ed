@@ -56,10 +56,14 @@
 <!-- Layout -->
 <div class="layout">
 
+  <button class="edge-toggle edge-toggle-left" id="edge-toggle-left" onclick="toggleSidebar()" aria-label="Open file browser" title="Open file browser">▸</button>
+  <div class="panel-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+
   <!-- Sidebar -->
   <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <span>Files</span>
+      <button class="btn btn-ghost panel-close-btn" onclick="toggleSidebar()" aria-label="Close file browser" title="Close file browser">✕</button>
     </div>
     <div class="file-tree" id="file-tree">
       <div style="padding:0.5rem 0.7rem;color:var(--text2);font-size:0.74rem">
@@ -212,6 +216,9 @@
 
   <div class="resize-handle" id="resize-right"></div>
 
+  <button class="edge-toggle edge-toggle-right" id="edge-toggle-right" onclick="toggleRightPanel()" aria-label="Open right panel" title="Open right panel">◂</button>
+  <div class="panel-backdrop" id="right-panel-backdrop" onclick="toggleRightPanel()"></div>
+
   <!-- Right panel -->
   <div class="right-panel" id="right-panel">
     <div class="panel-tabs">
@@ -220,6 +227,7 @@
       <button class="panel-tab" onclick="switchPanel('terminal')">Terminal</button>
       <button class="panel-tab" onclick="switchPanel('logs')">Logs</button>
       <button class="panel-tab" onclick="switchPanel('settings')">Settings</button>
+      <button class="btn btn-ghost panel-close-btn" onclick="toggleRightPanel()" aria-label="Close right panel" title="Close right panel">✕</button>
     </div>
     <div class="panel-content">
 
