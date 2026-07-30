@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the UID). Previously `useradd --system --user-group` allocated GIDs in
   login order, which could let users inherit each other's group-owned
   workspace files across restarts on persistent-volume deployments.
+- Editor layout no longer requires horizontal/vertical scrolling on tablet
+  windows (e.g. iPad) -- the file browser and right panel become slide-in
+  overlays below 1024px wide instead of fixed-pixel flex panes, and `body`
+  uses `100dvh` so iOS Safari's dynamic toolbar doesn't hide the status
+  bar. Both panels now also have touch-friendly edge-tab open buttons and
+  in-panel close (✕) buttons, and the drag-resize handles support touch.
 
 ## [0.1.0] - 2026-06-10
 
