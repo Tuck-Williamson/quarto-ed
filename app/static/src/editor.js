@@ -440,13 +440,19 @@ function scheduleAutoSave() {
 
 // ── Sidebar / panels ───────────────────────────────────────────────────────
 window.toggleSidebar = () => {
-  document.getElementById("sidebar").classList.toggle("collapsed");
+  const collapsed = document.getElementById("sidebar").classList.toggle("collapsed");
   document.getElementById("resize-left").classList.toggle("hidden");
+  document.getElementById("edge-toggle-left").classList.toggle("visible", collapsed);
+  document.getElementById("sidebar-backdrop").classList.toggle("visible", !collapsed);
+  localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0");
   updateViewMenuChecks();
 };
 window.toggleRightPanel = () => {
-  document.getElementById("right-panel").classList.toggle("collapsed");
+  const collapsed = document.getElementById("right-panel").classList.toggle("collapsed");
   document.getElementById("resize-right").classList.toggle("hidden");
+  document.getElementById("edge-toggle-right").classList.toggle("visible", collapsed);
+  document.getElementById("right-panel-backdrop").classList.toggle("visible", !collapsed);
+  localStorage.setItem("right-panel-collapsed", collapsed ? "1" : "0");
   updateViewMenuChecks();
 };
 
@@ -456,6 +462,30 @@ function updateViewMenuChecks() {
   document.getElementById("check-rightpanel").classList.toggle(
     "visible", !document.getElementById("right-panel").classList.contains("collapsed"));
 }
+
+// ── Compact layout (tablet and below) ───────────────────────────────────────
+// Single breakpoint listener today; a future phone-specific pass can add a
+// second matchMedia() alongside this one rather than reworking it — see the
+// matching comment in input.css above the compact-mode media query.
+const COMPACT_MEDIA = window.matchMedia("(max-width: 1024px)");
+function enterCompactMode() {
+  // Default to collapsed on first visit (scroll-free first paint on a
+  // tablet); afterwards always honor whatever the user last chose.
+  const wantCollapsed = (key) => {
+    const pref = localStorage.getItem(key);
+    return pref === null ? true : pref === "1";
+  };
+  if (wantCollapsed("sidebar-collapsed") !==
+      document.getElementById("sidebar").classList.contains("collapsed")) {
+    toggleSidebar();
+  }
+  if (wantCollapsed("right-panel-collapsed") !==
+      document.getElementById("right-panel").classList.contains("collapsed")) {
+    toggleRightPanel();
+  }
+}
+COMPACT_MEDIA.addEventListener("change", e => { if (e.matches) enterCompactMode(); });
+if (COMPACT_MEDIA.matches) enterCompactMode();
 
 // ── Edit menu / editor commands ───────────────────────────────────────────
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -1443,27 +1473,37 @@ function initResize(handleId, fixedId, storageKey, side) {
   const saved = parseInt(localStorage.getItem(storageKey));
   if (saved && saved > 0) { fixedEl.style.width = saved + "px"; fixedEl.style.minWidth = saved + "px"; }
 
-  handle.addEventListener("mousedown", e => {
-    e.preventDefault();
-    const startX = e.clientX;
+  function beginDrag(startX) {
     const startW = fixedEl.getBoundingClientRect().width;
     handle.classList.add("dragging");
 
-    function onMove(e) {
-      const dx = e.clientX - startX;
+    function apply(clientX) {
+      const dx = clientX - startX;
       const newW = Math.max(100, side === "left" ? startW + dx : startW - dx);
       fixedEl.style.width = newW + "px";
       fixedEl.style.minWidth = newW + "px";
       localStorage.setItem(storageKey, newW);
     }
-    function onUp() {
+    function end() {
       handle.classList.remove("dragging");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
     }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  });
+    function onMouseMove(e) { apply(e.clientX); }
+    function onMouseUp() { end(); }
+    function onTouchMove(e) { apply(e.touches[0].clientX); }
+    function onTouchEnd() { end(); }
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd);
+  }
+
+  handle.addEventListener("mousedown", e => { e.preventDefault(); beginDrag(e.clientX); });
+  handle.addEventListener("touchstart", e => { e.preventDefault(); beginDrag(e.touches[0].clientX); }, { passive: false });
 }
 
 // ── Logs ───────────────────────────────────────────────────────────────────
