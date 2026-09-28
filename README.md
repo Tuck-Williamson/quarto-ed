@@ -1,6 +1,28 @@
 # quarto-ed
 
-A SaaS service for editing [Quarto](https://quarto.org) documents in a browser-based web editor, authenticated via GitHub OAuth2.
+A SaaS platform for editing [Quarto](https://quarto.org) documents in a browser-based web editor, authenticated via GitHub OAuth2.
+
+This code was a project of mine over the summer of 2026. 
+My goal was to better understand what my students would encounter in the job market, given the recent advancements in AI.
+A secondary goal was to make my life easier so I wouldn't need to lug around my heavy, battery-hungry laptop to work. I prep much of my class materials in Quarto. 
+
+The secondary goal went away when the department provided me with a work laptop, so this is a usable product, but it has quirks and issues outstanding that I am not ironing out.
+I tried to use AI for most of the actual work.
+I was near 100% successful (occasionally, I ran out of credits and hand-tweaked some things).
+I did try to review every commit thoroughly, but that said, this wasn't my job, and I had a lot going on this summer.
+
+## CS Student Reflection Based on Agentic Work
+
+My overall takeaway was that I needed to emphasize systems-level thinking while ensuring that they understand the interplay between different systems. 
+
+While I used several different AI platforms to develop this project, I ultimately settled on Claude Code. 
+It was **by FAR** the best agentic code development platform at the time. 
+Despite that, I knew there were deep security issues with this project, inherent in the design (supporting a CLI toolchain that needed to install its own components dynamically). 
+I prompted security analyses multiple times before having to point out major issues. 
+After I did, the AI picked up on the kind of security issues by looking at similar products (Jupyter Notebooks), but I really needed to understand how putting CLI access on a web SaaS platform exposed them. 
+There are only a few products that have similar security concerns, so until I connected those dots, AI was only picking up more typical security issues.
+
+This has driven much of my lecturing for my Operating Systems course this semester.
 
 ## Architecture
 
